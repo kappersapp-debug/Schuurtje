@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//c/Mosaidcuts/**)",
-      "Bash(dir C:\\\\Mosaidcuts /b)"
+      "Bash(dir C:\\\\Mosaidcuts /b)",
+      "Read(//c/Users/icigi/.claude/projects/c--mosaidcuts/memory/**)"
     ]
   }
 }
