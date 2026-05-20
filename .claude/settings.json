@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Mosaidcuts/**)",
+      "Bash(dir C:\\\\Mosaidcuts /b)"
+    ]
+  }
+}
