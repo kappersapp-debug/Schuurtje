@@ -12,7 +12,7 @@ function formatDateNL(ds: string) {
   return `${NL_DAYS[d.getDay()]} ${d.getDate()} ${NL_MONTHS[d.getMonth()]} ${d.getFullYear()}`
 }
 function esc(s: unknown): string {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 export async function GET() {
@@ -85,18 +85,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return Response.json({ ok: true, geannuleerdAantal: bookings?.length ?? 0 })
+  return Response.json({ ok: true, afspraken_geannuleerd: bookings?.length ?? 0 })
 }
 
 export async function DELETE(req: NextRequest) {
   const session = await getKapperSession()
   if (!session) return Response.json({ error: 'Niet ingelogd' }, { status: 401 })
 
-  const { email } = await req.json().catch(() => ({}))
-  if (!email) return Response.json({ error: 'email verplicht' }, { status: 400 })
+  const { id } = await req.json().catch(() => ({}))
+  if (!id) return Response.json({ error: 'id verplicht' }, { status: 400 })
 
   await supabaseAdmin.from('banned_emails').delete()
-    .eq('barber_id', session.id).eq('email', email.toLowerCase())
+    .eq('barber_id', session.id).eq('id', id)
 
   return Response.json({ ok: true })
 }

@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { stuurHerinneringsMail } from '@/lib/mailer'
 
 function esc(s: unknown): string {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 export async function GET(request: Request) {
@@ -11,9 +11,10 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const tomorrowStr = tomorrow.toISOString().split('T')[0]
+  const todayNl = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).split(' ')[0]
+  const [ty, tm, td] = todayNl.split('-').map(Number)
+  const tomorrowNl = new Date(ty, tm - 1, td + 1)
+  const tomorrowStr = `${tomorrowNl.getFullYear()}-${String(tomorrowNl.getMonth()+1).padStart(2,'0')}-${String(tomorrowNl.getDate()).padStart(2,'0')}`
 
   const { data: bookings } = await supabaseAdmin
     .from('bookings').select('*, barbers(naam, slug)')
