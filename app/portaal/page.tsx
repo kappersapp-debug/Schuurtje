@@ -78,9 +78,39 @@ function AnimatedNumber({value}:{value:number|string}) {
 
 function CalendarSubscribeButton() {
   const[url,setUrl]=useState<string|null>(null)
-  useEffect(()=>{ fetch('/api/portaal/calendar-url').then(r=>r.json()).then(d=>{if(d.url)setUrl(d.url)}).catch(()=>{}) },[])
+  const[laden,setLaden]=useState(true)
+  const[gekopieerd,setGekopieerd]=useState(false)
+  useEffect(()=>{
+    fetch('/api/portaal/calendar-url').then(r=>r.json()).then(d=>{if(d.url)setUrl(d.url)}).catch(()=>{}).finally(()=>setLaden(false))
+  },[])
+  function kopieer(){
+    if(!url)return
+    navigator.clipboard.writeText(url).then(()=>{setGekopieerd(true);setTimeout(()=>setGekopieerd(false),2000)}).catch(()=>{})
+  }
+  if(laden)return(
+    <div className="border border-[#2a2a2a] rounded-xl px-4 py-3 flex items-center gap-2 text-gray-600 text-sm">
+      <div className="w-3.5 h-3.5 border-2 border-gray-700 border-t-[#2176d4] rounded-full animate-spin"/>
+      Agenda abonnement laden...
+    </div>
+  )
   if(!url)return null
-  return <a href={url} title="Abonneer op agenda in Apple Agenda / Outlook" className="px-4 py-2 border border-[#2a2a2a] text-gray-400 rounded-xl font-bold text-sm hover:border-[#2176d4]/50 hover:text-white transition-all">📅 Agenda</a>
+  return(
+    <div className="border border-[#2a2a2a] rounded-xl p-4 space-y-3">
+      <div>
+        <p className="font-bold text-white text-sm mb-0.5">📅 Agenda abonnement</p>
+        <p className="text-xs text-gray-500">Voeg al uw afspraken toe aan Apple Agenda, Google Agenda of Outlook. Wordt automatisch gesynchroniseerd.</p>
+      </div>
+      <div className="flex gap-2">
+        <a href={url} className="flex-1 px-3 py-2 bg-[#2176d4] text-white rounded-lg font-bold text-sm hover:bg-[#3080e0] transition-colors text-center">
+          Abonneren
+        </a>
+        <button onClick={kopieer} className={`px-3 py-2 rounded-lg font-bold text-sm border transition-colors ${gekopieerd?'border-green-700/50 text-green-400 bg-green-900/20':'border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444]'}`}>
+          {gekopieerd?'Gekopieerd ✓':'Kopieer URL'}
+        </button>
+      </div>
+      <p className="text-[10px] text-gray-700 break-all font-mono">{url}</p>
+    </div>
+  )
 }
 
 /* ─── Login ──────────────────────────────────────────────── */
