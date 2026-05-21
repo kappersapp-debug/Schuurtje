@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   if (error) return Response.json({ error: error.message }, { status: 500 })
 
   await supabaseAdmin.from('settings').insert([
-    { barber_id: barber.id, key: 'day_schedule', value: JSON.stringify(defaultSchedule) },
+    { barber_id: barber.id, key: 'schema', value: JSON.stringify(defaultSchedule) },
     { barber_id: barber.id, key: 'diensten', value: JSON.stringify(defaultDiensten) },
     { barber_id: barber.id, key: 'meldingen', value: 'true' },
     { barber_id: barber.id, key: 'herinneringen', value: 'true' },

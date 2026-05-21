@@ -18,7 +18,7 @@ export default function InstellingenPage() {
     fetch('/api/instellingen')
       .then((r) => r.json())
       .then(({ instellingen }) => {
-        if (instellingen.day_schedule) setSchema(JSON.parse(instellingen.day_schedule))
+        if (instellingen.schema) setSchema(JSON.parse(instellingen.schema))
         if (instellingen.diensten) setDiensten(JSON.parse(instellingen.diensten))
         if (instellingen.meldingen) setMeldingen(instellingen.meldingen === 'true')
         if (instellingen.herinneringen) setHerinneringen(instellingen.herinneringen === 'true')
@@ -66,7 +66,7 @@ export default function InstellingenPage() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold">Openingstijden</h2>
-          <button onClick={() => sla('day_schedule', schema)} disabled={opslaan} className="text-sm px-4 py-1.5 rounded-lg bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-50">Opslaan</button>
+          <button onClick={() => sla('schema', schema)} disabled={opslaan} className="text-sm px-4 py-1.5 rounded-lg bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-50">Opslaan</button>
         </div>
         <div className="space-y-3">
           {[1, 2, 3, 4, 5, 6, 0].map((dag) => {

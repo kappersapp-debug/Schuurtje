@@ -92,7 +92,7 @@ export async function stuurAnnuleringsBevestiging(opts: {
 
 export async function stuurVerzetBevestiging(opts: {
   naar: string; naam: string; kapperNaam: string; service: string
-  nieuweDatum: string; nieuweTijd: string; code: string; slug: string; baseUrl: string
+  nieuweDatum: string; nieuweTijd: string; prijs: number; code: string; slug: string; baseUrl: string
 }) {
   const annuleerUrl = `${opts.baseUrl}/${opts.slug}?annuleer=${opts.code}`
   const verzetUrl   = `${opts.baseUrl}/${opts.slug}?verzet=${opts.code}`
@@ -113,11 +113,13 @@ export async function stuurVerzetBevestiging(opts: {
             <p style="margin:6px 0;"><strong>Dienst:</strong> ${esc(opts.service)}</p>
             <p style="margin:6px 0;"><strong>Nieuwe datum:</strong> ${formatDateNL(opts.nieuweDatum)}</p>
             <p style="margin:6px 0;"><strong>Nieuwe tijd:</strong> ${opts.nieuweTijd}</p>
+            <p style="margin:6px 0;"><strong>Prijs:</strong> €${opts.prijs}</p>
           </div>
           <div style="text-align:center;margin:24px 0;">
-            <a href="${verzetUrl}" style="display:block;background:#2176d4;color:#fff;font-weight:700;padding:13px 22px;border-radius:10px;text-decoration:none;font-size:15px;margin-bottom:10px;">Opnieuw verzetten</a>
+            <a href="${verzetUrl}" style="display:block;background:#2176d4;color:#fff;font-weight:700;padding:13px 22px;border-radius:10px;text-decoration:none;font-size:15px;margin-bottom:10px;">Afspraak verzetten</a>
             <a href="${annuleerUrl}" style="display:block;background:#dc2626;color:#fff;font-weight:700;padding:13px 22px;border-radius:10px;text-decoration:none;font-size:15px;">Afspraak annuleren</a>
           </div>
+          <p style="color:#888;font-size:12px;text-align:center;">Of gebruik boekingscode <strong>${opts.code}</strong> op de website.</p>
         </div>
       </div>`,
   })
@@ -147,7 +149,7 @@ export async function stuurHerinneringsMail(opts: {
             <p style="margin:6px 0;"><strong>Tijd:</strong> ${opts.tijd}</p>
             <p style="margin:6px 0;"><strong>Prijs:</strong> €${opts.prijs}</p>
           </div>
-          <p style="color:#555;">Kunt u niet komen? Annuleer dan zo snel mogelijk.</p>
+          <p style="color:#555;">Kunt u niet komen? Annuleer dan zo snel mogelijk via de knop hieronder.</p>
           <div style="text-align:center;margin:24px 0;">
             <a href="${annuleerUrl}" style="display:inline-block;background:#dc2626;color:#fff;font-weight:700;padding:12px 28px;border-radius:10px;text-decoration:none;font-size:15px;">Afspraak annuleren</a>
           </div>

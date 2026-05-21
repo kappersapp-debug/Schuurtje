@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   const { data: booking } = await supabaseAdmin
     .from('bookings')
-    .select('id, barber_id, naam, email, service, datum, tijd, duur')
+    .select('id, barber_id, naam, email, service, prijs, datum, tijd, duur')
     .eq('code', code.toUpperCase())
     .eq('geannuleerd', false)
     .single()
@@ -44,10 +44,10 @@ export async function POST(req: NextRequest) {
     .from('settings')
     .select('key, value')
     .eq('barber_id', booking.barber_id)
-    .in('key', ['day_schedule', 'diensten'])
+    .in('key', ['schema', 'diensten'])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
-  const weekSchema: WeekSchedule = JSON.parse(map.day_schedule ?? '{}')
+  const weekSchema: WeekSchedule = JSON.parse(map.schema ?? '{}')
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
   const dienst = diensten.find((d) => d.naam === booking.service)
   if (!dienst) return Response.json({ error: 'Dienst niet gevonden' }, { status: 404 })
@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       service: booking.service,
       nieuweDatum: datum,
       nieuweTijd: tijd,
+      prijs: booking.prijs ?? 0,
       code: code.toUpperCase(),
       slug: barber?.slug ?? '',
       baseUrl,

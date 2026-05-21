@@ -80,7 +80,7 @@ function CalendarSubscribeButton() {
   const[url,setUrl]=useState<string|null>(null)
   useEffect(()=>{ fetch('/api/portaal/calendar-url').then(r=>r.json()).then(d=>{if(d.url)setUrl(d.url)}).catch(()=>{}) },[])
   if(!url)return null
-  return <a href={url} title="Abonneer op agenda" className="px-4 py-2 border border-[#2a2a2a] text-gray-400 rounded-xl font-bold text-sm hover:border-[#2176d4]/50 hover:text-white transition-all">📅 Agenda</a>
+  return <a href={url} title="Abonneer op agenda in Apple Agenda / Outlook" className="px-4 py-2 border border-[#2a2a2a] text-gray-400 rounded-xl font-bold text-sm hover:border-[#2176d4]/50 hover:text-white transition-all">📅 Agenda</a>
 }
 
 /* ─── Login ──────────────────────────────────────────────── */
@@ -922,52 +922,45 @@ function ServicesView() {
 }
 
 /* ─── Toggle ─────────────────────────────────────────────── */
-function Toggle({on,onChange}:{on:boolean;onChange:(v:boolean)=>void}){
+function Toggle({value,onChange}:{value:boolean;onChange:(v:boolean)=>void}){
   return(
-    <button type="button" onClick={()=>onChange(!on)}
-      className={`relative w-11 h-6 rounded-full transition-colors ${on?'bg-[#2176d4]':'bg-[#2a2a2a]'}`}>
-      <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${on?'translate-x-5':''}`}/>
+    <button onClick={()=>onChange(!value)}
+      className={`relative inline-flex w-12 h-6 rounded-full transition-colors ${value?'bg-[#2176d4]':'bg-[#333]'}`}>
+      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${value?'translate-x-6':'translate-x-0.5'}`}/>
     </button>
   )
 }
 
 /* ─── BlockedCalendar ────────────────────────────────────── */
 function BlockedCalendar({blocked,onChange}:{blocked:string[];onChange:(v:string[])=>void}){
-  const today=new Date()
-  const[ym,setYm]=useState(()=>`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
-  const[yr,mo]=ym.split('-').map(Number)
-  const first=new Date(yr,mo-1,1)
-  const totalDays=new Date(yr,mo,0).getDate()
-  const startDow=(first.getDay()+6)%7
-  function toggle(ds:string){
-    onChange(blocked.includes(ds)?blocked.filter(x=>x!==ds):[...blocked,ds])
-  }
-  const cells:React.ReactNode[]=[]
-  for(let i=0;i<startDow;i++)cells.push(<div key={`e${i}`}/>)
-  for(let d=1;d<=totalDays;d++){
-    const ds=`${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`
-    const isPast=ds<toDateStr(today)
-    const isBlocked=blocked.includes(ds)
-    cells.push(
-      <button key={ds} type="button" disabled={isPast} onClick={()=>toggle(ds)}
-        className={`aspect-square rounded-lg text-sm font-medium transition-colors ${isPast?'opacity-30 cursor-not-allowed bg-transparent text-gray-600':isBlocked?'bg-red-600/80 text-white':'bg-[#1a1a1a] text-gray-300 hover:bg-[#2176d4]/30 hover:text-white'}`}>
-        {d}
-      </button>
-    )
-  }
+  const today=new Date();today.setHours(0,0,0,0)
+  const[viewMonth,setViewMonth]=useState(new Date(today.getFullYear(),today.getMonth(),1))
+  const firstDay=new Date(viewMonth.getFullYear(),viewMonth.getMonth(),1)
+  const lastDay=new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,0)
+  const startOffset=(firstDay.getDay()+6)%7
+  const cells:(Date|null)[]=Array(startOffset).fill(null)
+  for(let i=1;i<=lastDay.getDate();i++)cells.push(new Date(viewMonth.getFullYear(),viewMonth.getMonth(),i))
+  function toggle(ds:string){onChange(blocked.includes(ds)?blocked.filter(d=>d!==ds):[...blocked,ds].sort())}
   return(
-    <div>
+    <div className="select-none">
       <div className="flex items-center justify-between mb-3">
-        <button type="button" onClick={()=>{const d=new Date(yr,mo-2,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
-          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&lt;</button>
-        <span className="text-white font-bold capitalize">{NL_MONTHS_LONG[mo-1]} {yr}</span>
-        <button type="button" onClick={()=>{const d=new Date(yr,mo,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
-          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&gt;</button>
+        <button onClick={()=>setViewMonth(new Date(viewMonth.getFullYear(),viewMonth.getMonth()-1,1))}
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 text-gray-400 font-bold text-lg transition-colors">‹</button>
+        <span className="font-bold text-white capitalize text-sm">{viewMonth.toLocaleDateString('nl-NL',{month:'long',year:'numeric'})}</span>
+        <button onClick={()=>setViewMonth(new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,1))}
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/5 text-gray-400 font-bold text-lg transition-colors">›</button>
       </div>
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {NL_DAYS_SHORT.map(d=><div key={d} className="aspect-square flex items-center justify-center text-xs text-gray-500 font-medium">{d}</div>)}
+      <div className="grid grid-cols-7 mb-1">{NL_DAYS_SHORT.map(d=><div key={d} className="text-center text-xs font-bold text-gray-500 py-1">{d}</div>)}</div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day,i)=>{
+          if(!day)return<div key={i}/>
+          const ds=toDateStr(day);const isPast=day<today;const isBlocked=blocked.includes(ds);const isToday=day.getTime()===today.getTime()
+          return<button key={i} disabled={isPast} onClick={()=>toggle(ds)}
+            className={['aspect-square flex items-center justify-center rounded-xl text-xs font-bold transition-all',isPast?'text-gray-700 cursor-not-allowed':isBlocked?'bg-red-600 text-white shadow hover:bg-red-700 scale-105':isToday?'ring-2 ring-[#2176d4] text-[#2176d4] hover:bg-red-900/20 hover:text-red-400 hover:ring-red-500':'text-gray-300 hover:bg-red-900/20 hover:text-red-400'].join(' ')}>
+            {day.getDate()}
+          </button>
+        })}
       </div>
-      <div className="grid grid-cols-7 gap-1">{cells}</div>
     </div>
   )
 }
@@ -1016,132 +1009,202 @@ function PortalDatePicker({value,onChange,min}:{value:string;onChange:(v:string)
 function WaitlistSection({slug}:{slug:string}){
   const[list,setList]=useState<WachtlijstEntry[]>([])
   const[loading,setLoading]=useState(true)
-  const[assigning,setAssigning]=useState<WachtlijstEntry|null>(null)
-  const[slots,setSlots]=useState<string[]>([])
+  const[removing,setRemoving]=useState<string|null>(null)
+  const[confirmRemove,setConfirmRemove]=useState<string|null>(null)
+  const[assignEntry,setAssignEntry]=useState<WachtlijstEntry|null>(null)
   const[diensten,setDiensten]=useState<{id:string;naam:string;prijs:number;duur:number}[]>([])
-  const[form,setForm]=useState({datum:'',dienst:'',slot:'',prijs:0,duur:0})
-  const[saving,setSaving]=useState(false)
+  const[assignDate,setAssignDate]=useState('')
+  const[assignDienst,setAssignDienst]=useState('')
+  const[assignPrijs,setAssignPrijs]=useState(0)
+  const[assignDuur,setAssignDuur]=useState(30)
+  const[assignTijd,setAssignTijd]=useState('')
+  const[assignSlots,setAssignSlots]=useState<string[]>([])
+  const[assignSlotsLoading,setAssignSlotsLoading]=useState(false)
+  const[assignLoading,setAssignLoading]=useState(false)
+  const[assignError,setAssignError]=useState('')
+  const[assignDone,setAssignDone]=useState(false)
+  const[filterDatum,setFilterDatum]=useState<string|null>(null)
 
+  async function loadList(){
+    const r=await fetch('/api/wachtlijst');const d=await r.json();setList(d.wachtlijst??[]);setLoading(false)
+  }
   useEffect(()=>{
-    Promise.all([
-      fetch('/api/wachtlijst').then(r=>r.json()),
-      fetch('/api/instellingen').then(r=>r.json()),
-    ]).then(([wd,sd])=>{
-      setList(wd.wachtlijst??[])
-      const dienstenRaw=sd.instellingen?.diensten
-      setDiensten(dienstenRaw?JSON.parse(dienstenRaw):[])
-      setLoading(false)
+    loadList()
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const raw=d.instellingen?.diensten;setDiensten(raw?JSON.parse(raw):[])
     })
   },[])
 
-  useEffect(()=>{
-    if(!form.datum||!form.dienst)return
-    const svc=diensten.find(d=>d.naam===form.dienst)
-    if(!svc)return
-    fetch(`/api/slots/${slug}?datum=${form.datum}&dienst=${svc.id}`).then(r=>r.json()).then(d=>{
-      setSlots(Array.isArray(d)?d:d.slots??[])
-    })
-  },[form.datum,form.dienst,slug,diensten])
+  async function fetchSlots(datum:string,duur:number){
+    if(!datum){setAssignSlots([]);return}
+    setAssignSlotsLoading(true);setAssignTijd('')
+    const svc=diensten.find(d=>d.duur===duur)??diensten[0]
+    if(!svc){setAssignSlotsLoading(false);return}
+    const r=await fetch(`/api/slots/${slug}?datum=${datum}&dienst=${svc.id}`)
+    const data=await r.json();setAssignSlots(data.slots??[]);setAssignSlotsLoading(false)
+  }
 
-  async function assign(){
-    if(!assigning||!form.datum||!form.dienst||!form.slot)return
-    const svc=diensten.find(d=>d.naam===form.dienst)
-    setSaving(true)
-    await fetch('/api/wachtlijst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      wachtlijst_id:assigning.id,datum:form.datum,tijd:form.slot,
-      service:form.dienst,prijs:svc?.prijs??0,duur:svc?.duur??30,
-    })})
-    setSaving(false)
-    setAssigning(null)
-    const wd=await fetch('/api/wachtlijst').then(r=>r.json())
-    setList(wd.wachtlijst??[])
+  function openAssign(w:WachtlijstEntry){
+    const svc=diensten.find(s=>s.naam===w.service)??diensten[0]
+    setAssignEntry(w);setAssignDate(w.datum??'');setAssignDienst(svc?.naam??'')
+    setAssignPrijs(svc?.prijs??0);setAssignDuur(svc?.duur??30)
+    setAssignTijd('');setAssignError('');setAssignDone(false)
+    if(w.datum&&svc)fetchSlots(w.datum,svc.duur)
+    else setAssignSlots([])
   }
 
   async function remove(id:string){
+    setRemoving(id)
     await fetch('/api/wachtlijst',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
-    setList(l=>l.filter(x=>x.id!==id))
+    setRemoving(null);setConfirmRemove(null);loadList()
   }
 
+  async function assign(){
+    if(!assignEntry||!assignDate||!assignTijd||!assignDienst){setAssignError('Kies een datum en tijdslot');return}
+    setAssignLoading(true);setAssignError('')
+    const r=await fetch('/api/wachtlijst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      wachtlijst_id:assignEntry.id,datum:assignDate,tijd:assignTijd,
+      service:assignDienst,prijs:assignPrijs,duur:assignDuur,
+    })})
+    const d=await r.json();setAssignLoading(false)
+    if(!r.ok){setAssignError(d.error??'Fout bij inplannen');return}
+    setAssignDone(true)
+    setTimeout(()=>{setAssignEntry(null);setAssignDone(false);loadList()},2000)
+  }
+
+  const uniqueDatums=useMemo(()=>[...new Set(list.map(w=>w.datum??''))].filter(Boolean).sort(),[list])
   const grouped=useMemo(()=>{
     const m=new Map<string,WachtlijstEntry[]>()
-    for(const w of list){
-      const k=w.datum??'Geen datum'
-      const a=m.get(k)??[]
-      a.push(w)
-      m.set(k,a)
-    }
-    return Array.from(m.entries()).sort((a,b)=>a[0].localeCompare(b[0]))
+    for(const w of list){const k=w.datum??'';const a=m.get(k)??[];a.push(w);m.set(k,a)}
+    return m
   },[list])
+  const visibleDatums=filterDatum?[filterDatum]:uniqueDatums
 
-  if(loading)return<div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
   return(
-    <div>
-      {list.length===0&&<p className="text-center text-gray-500 py-8 font-medium">Wachtlijst is leeg</p>}
-      {grouped.map(([datum,entries])=>(
-        <div key={datum} className="mb-4">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{datum==='Geen datum'?'Geen datum':formatLongDate(datum)}</p>
-          <div className="space-y-2">
-            {entries.map(w=>(
-              <div key={w.id} className="flex items-center justify-between bg-[#1a1a1a] rounded-xl p-3 gap-2">
-                <div className="min-w-0">
-                  <p className="font-bold text-white text-sm truncate">{w.naam}</p>
-                  <p className="text-xs text-gray-400">{w.service} · {w.telefoon}</p>
-                  <p className="text-xs text-gray-500">{w.email}</p>
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-[family-name:var(--font-bebas)] tracking-widest text-white">Wachtlijst</h2>
+          <p className="text-xs text-gray-500">Klanten die willen boeken maar geen slot hadden</p>
+        </div>
+        <button onClick={loadList} className="text-xs text-[#2176d4] hover:underline">Vernieuwen</button>
+      </div>
+      {!loading&&list.length>0&&(
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button onClick={()=>setFilterDatum(null)}
+            className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${filterDatum===null?'bg-[#2176d4] border-[#2176d4] text-white':'border-[#2a2a2a] text-gray-400 hover:border-[#2176d4] hover:text-white'}`}>
+            Alle ({list.length})
+          </button>
+          {uniqueDatums.map(datum=>(
+            <button key={datum} onClick={()=>setFilterDatum(datum===filterDatum?null:datum)}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${filterDatum===datum?'bg-[#2176d4] border-[#2176d4] text-white':'border-[#2a2a2a] text-gray-400 hover:border-[#2176d4] hover:text-white'}`}>
+              {formatMedDate(datum)} ({(grouped.get(datum)?.length??0)})
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] overflow-hidden">
+        {loading?<div className="flex justify-center py-8"><div className="w-6 h-6 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+        :list.length===0?<p className="text-center text-gray-500 font-medium py-8">Geen wachtlijst inschrijvingen</p>:(
+          <div>
+            {visibleDatums.map(datum=>(
+              <div key={datum}>
+                <div className="px-5 py-2.5 bg-[#0e0e0e] border-b border-[#1e1e1e] flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{formatLongDate(datum)}</span>
+                  <span className="text-xs text-gray-600">· {grouped.get(datum)?.length??0} {(grouped.get(datum)?.length??0)===1?'persoon':'personen'}</span>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={()=>{setAssigning(w);setForm({datum:'',dienst:w.service,slot:'',prijs:0,duur:0})}}
-                    className="px-3 py-1.5 bg-[#2176d4] text-white rounded-lg text-xs font-bold hover:bg-[#3080e0] transition-colors">
-                    Inplannen
-                  </button>
-                  <button onClick={()=>remove(w.id)}
-                    className="px-3 py-1.5 bg-red-600/20 text-red-400 rounded-lg text-xs font-bold hover:bg-red-600/30 transition-colors">
-                    Verwijder
-                  </button>
+                <div className="divide-y divide-[#1e1e1e]">
+                  {(grouped.get(datum)??[]).map(w=>(
+                    <div key={w.id} className="px-5 py-4 flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold text-white">{w.naam}</p>
+                          {w.service&&<span className="text-xs bg-[#1e1e1e] text-gray-400 px-2 py-0.5 rounded-full">{w.service}</span>}
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                          {w.telefoon&&<a href={`tel:${w.telefoon}`} className="text-xs text-[#2176d4] hover:underline">{w.telefoon}</a>}
+                          {w.email&&<a href={`mailto:${w.email}`} className="text-xs text-[#2176d4] hover:underline">{w.email}</a>}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={()=>openAssign(w)}
+                          className="px-3 py-1.5 bg-[#2176d4] text-white rounded-lg text-xs font-bold hover:bg-[#3080e0] transition-colors">
+                          Inplannen
+                        </button>
+                        {confirmRemove===w.id?(
+                          <div className="flex gap-1">
+                            <button onClick={()=>remove(w.id)} disabled={removing===w.id} className="text-xs bg-red-500 text-white px-2 py-1 rounded-lg font-bold disabled:opacity-50">{removing===w.id?'...':'Ja'}</button>
+                            <button onClick={()=>setConfirmRemove(null)} className="text-xs border border-[#333] text-gray-400 px-2 py-1 rounded-lg font-bold">Nee</button>
+                          </div>
+                        ):(
+                          <button onClick={()=>setConfirmRemove(w.id)} className="px-3 py-1.5 border border-[#2a2a2a] text-gray-400 rounded-lg text-xs font-medium hover:bg-white/5 transition-colors">Verwijder</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      ))}
-      {assigning&&(
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold text-white mb-4">Inplannen: {assigning.naam}</h3>
-            <div className="space-y-3">
+        )}
+      </div>
+      {assignEntry&&(
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={()=>{if(!assignLoading)setAssignEntry(null)}}>
+          <div className="bg-[#141414] rounded-t-2xl sm:rounded-2xl border-t sm:border border-[#2a2a2a] w-full sm:max-w-md shadow-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="px-6 py-5 border-b border-[#1e1e1e] flex items-center justify-between sticky top-0 bg-[#141414] z-10">
               <div>
-                <label className="block text-xs font-bold text-gray-400 mb-1.5">Dienst</label>
-                <select value={form.dienst} onChange={e=>setForm(f=>({...f,dienst:e.target.value,slot:''}))}
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#2176d4]">
-                  <option value="">Kies dienst</option>
-                  {diensten.map(d=><option key={d.id} value={d.naam}>{d.naam} (€{d.prijs})</option>)}
-                </select>
+                <h2 className="font-bold text-white text-base">Inplannen</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{assignEntry.naam} · voorkeur {assignEntry.datum?formatShortDate(assignEntry.datum):''}</p>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 mb-1.5">Datum</label>
-                <PortalDatePicker value={form.datum} onChange={d=>setForm(f=>({...f,datum:d,slot:''}))}/>
-              </div>
-              {form.datum&&form.dienst&&(
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 mb-1.5">Tijdslot</label>
-                  {slots.length===0?<p className="text-gray-500 text-sm">Geen vrije tijden</p>:(
-                    <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
-                      {slots.map(s=>(
-                        <button key={s} type="button" onClick={()=>setForm(f=>({...f,slot:s}))}
-                          className={`py-2 rounded-lg text-sm font-medium transition-colors ${form.slot===s?'bg-[#2176d4] text-white':'bg-[#1a1a1a] text-gray-300 hover:bg-[#2176d4]/30'}`}>
-                          {s}
-                        </button>
-                      ))}
+              <button onClick={()=>setAssignEntry(null)} disabled={assignLoading}
+                className="w-8 h-8 rounded-lg bg-[#1e1e1e] text-gray-400 hover:text-white hover:bg-[#2a2a2a] transition-all flex items-center justify-center text-lg leading-none">×</button>
+            </div>
+            <div className="p-6 space-y-5">
+              {assignDone?(
+                <div className="text-center py-6">
+                  <div className="w-14 h-14 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <p className="font-bold text-white text-lg">Ingepland!</p>
+                  <p className="text-sm text-gray-400 mt-1">{assignEntry.email?'Bevestigingsmail verstuurd':'Afspraak aangemaakt'}</p>
+                </div>
+              ):(
+                <>
+                  {assignError&&<div className="bg-red-900/30 border border-red-700/40 text-red-400 text-sm px-4 py-3 rounded-xl">{assignError}</div>}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Datum</label>
+                    <PortalDatePicker value={assignDate} onChange={d=>{setAssignDate(d);fetchSlots(d,assignDuur)}}/>
+                  </div>
+                  {assignDienst&&(
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Dienst</label>
+                      <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-[#2a2a2a] bg-[#0e0e0e]">
+                        <span className="text-sm text-white font-medium">{assignDienst}</span>
+                        <span className="text-sm font-black text-[#2176d4]">€{assignPrijs} · {assignDuur}min</span>
+                      </div>
                     </div>
                   )}
-                </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Tijdslot</label>
+                    {assignSlotsLoading?<div className="flex justify-center py-4"><div className="w-5 h-5 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+                    :!assignDate?<p className="text-xs text-gray-600 py-2">Kies eerst een datum</p>
+                    :assignSlots.length===0?<p className="text-xs text-orange-400 py-2">Geen beschikbare slots op deze dag</p>:(
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {assignSlots.map(s=>(
+                          <button key={s} type="button" onClick={()=>setAssignTijd(s)}
+                            className={`py-2 rounded-lg text-sm font-bold transition-all border ${assignTijd===s?'bg-[#2176d4] border-[#2176d4] text-white':'border-[#2a2a2a] text-gray-400 hover:border-[#2176d4] hover:text-white'}`}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={assign} disabled={assignLoading||!assignTijd||!assignDate||!assignDienst}
+                    className="w-full py-3 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    {assignLoading?'Bezig...':'Inplannen & bevestiging sturen'}
+                  </button>
+                </>
               )}
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button onClick={()=>setAssigning(null)} className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] text-gray-300 text-sm font-bold hover:bg-[#1a1a1a] transition-colors">Annuleer</button>
-              <button onClick={assign} disabled={saving||!form.datum||!form.dienst||!form.slot}
-                className="flex-1 py-2.5 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] transition-colors disabled:opacity-50">
-                {saving?'Bezig...':'Inplannen'}
-              </button>
             </div>
           </div>
         </div>
@@ -1152,243 +1215,297 @@ function WaitlistSection({slug}:{slug:string}){
 
 /* ─── ManagementView ─────────────────────────────────────── */
 function ManagementView({session}:{session:Session}){
-  const[tab,setTab]=useState<'wachtlijst'|'bans'>('wachtlijst')
-  const[bans,setBans]=useState<GebandEmail[]>([])
-  const[bansLoading,setBansLoading]=useState(true)
-  const[banEmail,setBanEmail]=useState('')
-  const[banReden,setBanReden]=useState('')
-  const[banSaving,setBanSaving]=useState(false)
-  const[banError,setBanError]=useState('')
+  const[banned,setBanned]=useState<GebandEmail[]>([])
+  const[newEmail,setNewEmail]=useState('');const[reden,setReden]=useState('')
+  const[loading,setLoading]=useState(false);const[actionLoading,setActionLoading]=useState<string|null>(null)
+  const[showForm,setShowForm]=useState(false)
+  const[banMsg,setBanMsg]=useState('')
+  const[confirmUnban,setConfirmUnban]=useState<string|null>(null)
 
-  useEffect(()=>{
-    if(tab!=='bans')return
-    setBansLoading(true)
-    fetch('/api/ban').then(r=>r.json()).then(d=>{setBans(d.gebanned??[]);setBansLoading(false)})
-  },[tab])
+  async function load(){
+    const r=await fetch('/api/ban');const d=await r.json();setBanned(d.gebanned??[])
+  }
+  useEffect(()=>{load()},[])
 
-  async function addBan(){
-    if(!banEmail.trim())return
-    setBanError('');setBanSaving(true)
-    const r=await fetch('/api/ban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:banEmail.trim(),reden:banReden.trim()||'Geen reden opgegeven'})})
-    if(r.ok){
-      const d=await fetch('/api/ban').then(x=>x.json())
-      setBans(d.gebanned??[])
-      setBanEmail('');setBanReden('')
-    } else {
-      const d=await r.json()
-      setBanError(d.error??'Fout bij bannen')
-    }
-    setBanSaving(false)
+  async function ban(e:React.FormEvent){
+    e.preventDefault();setLoading(true);setBanMsg('')
+    const r=await fetch('/api/ban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:newEmail,reden})})
+    const d=await r.json()
+    setNewEmail('');setReden('');setShowForm(false);setLoading(false)
+    if(d.afspraken_geannuleerd>0)setBanMsg(`Geband — ${d.afspraken_geannuleerd} afspraak${d.afspraken_geannuleerd>1?'en':''} automatisch geannuleerd`)
+    else setBanMsg('Geband')
+    setTimeout(()=>setBanMsg(''),5000)
+    load()
   }
 
   async function unban(id:string){
+    setActionLoading(id)
     await fetch('/api/ban',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
-    setBans(b=>b.filter(x=>x.id!==id))
+    setActionLoading(null);setConfirmUnban(null);load()
   }
 
   return(
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <h2 className="text-2xl font-black text-white mb-6" style={{fontFamily:'var(--font-bebas)'}}>Beheer</h2>
-      <div className="flex gap-2 mb-6">
-        {(['wachtlijst','bans'] as const).map(t=>(
-          <button key={t} onClick={()=>setTab(t)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${tab===t?'bg-[#2176d4] text-white':'bg-[#1a1a1a] text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
-            {t==='wachtlijst'?'Wachtlijst':'Gebanned'}
-          </button>
-        ))}
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Beheer</h1>
+        <button onClick={()=>setShowForm(f=>!f)} className="px-4 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.35)] transition-all duration-200">
+          Email bannen
+        </button>
       </div>
-      {tab==='wachtlijst'&&<WaitlistSection slug={session.slug}/>}
-      {tab==='bans'&&(
-        <div>
-          <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-4 mb-6">
-            <h3 className="text-sm font-bold text-white mb-3">E-mail bannen</h3>
-            <div className="space-y-2">
-              <input value={banEmail} onChange={e=>setBanEmail(e.target.value)} placeholder="E-mailadres"
-                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
-              <input value={banReden} onChange={e=>setBanReden(e.target.value)} placeholder="Reden (optioneel)"
-                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
-              {banError&&<p className="text-red-400 text-xs">{banError}</p>}
-              <button onClick={addBan} disabled={banSaving||!banEmail.trim()}
-                className="w-full py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-500 transition-colors disabled:opacity-50">
-                {banSaving?'Bezig...':'Bannen'}
-              </button>
+      {banMsg&&<div className="mb-4 bg-[#2176d4]/10 border border-[#2176d4]/20 text-[#2176d4] text-sm font-bold px-4 py-3 rounded-xl">{banMsg}</div>}
+      {showForm&&(
+        <form onSubmit={ban} className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5 mb-6">
+          <h2 className="font-semibold text-white mb-4">Nieuw ban</h2>
+          <div className="grid sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-1">E-mailadres</label>
+              <input type="email" required value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="email@example.com"
+                className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-400 mb-1">Reden (optioneel)</label>
+              <input type="text" value={reden} onChange={e=>setReden(e.target.value)} placeholder="Reden voor ban"
+                className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
             </div>
           </div>
-          {bansLoading?<div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>:(
-            bans.length===0?<p className="text-center text-gray-500 py-8 font-medium">Geen gebande e-mails</p>:(
-              <div className="space-y-2">
-                {bans.map(b=>(
-                  <div key={b.id} className="flex items-center justify-between bg-[#1a1a1a] rounded-xl p-3 gap-2">
-                    <div className="min-w-0">
-                      <p className="font-bold text-white text-sm truncate">{b.email}</p>
-                      <p className="text-xs text-gray-400">{b.reden}</p>
-                      <p className="text-xs text-gray-500">{new Date(b.created_at).toLocaleDateString('nl-NL')}</p>
-                    </div>
-                    <button onClick={()=>unban(b.id)} className="px-3 py-1.5 bg-[#2176d4]/20 text-[#2176d4] rounded-lg text-xs font-bold hover:bg-[#2176d4]/30 transition-colors shrink-0">
-                      Unban
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
-          )}
-        </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={()=>setShowForm(false)} className="px-4 py-2 border-2 border-[#333] rounded-xl font-bold text-gray-400 text-sm hover:border-[#444] transition-colors">Annuleren</button>
+            <button type="submit" disabled={loading} className="px-6 py-2 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 disabled:opacity-50">
+              {loading?'Bezig...':'Bannen'}
+            </button>
+          </div>
+        </form>
       )}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] overflow-hidden">
+        <div className="px-5 py-4 border-b border-[#1e1e1e]">
+          <h2 className="font-semibold text-white text-sm">Gebande e-mails ({banned.length})</h2>
+        </div>
+        {banned.length===0?(
+          <p className="text-center text-gray-500 font-medium py-10">Geen gebande e-mails</p>
+        ):(
+          <div className="divide-y divide-[#1e1e1e]">
+            {banned.map(b=>(
+              <div key={b.id} className="flex items-center justify-between px-5 py-4 gap-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-white truncate">{b.email}</p>
+                  {b.reden&&<p className="text-xs text-gray-500 mt-0.5">{b.reden}</p>}
+                </div>
+                {confirmUnban===b.id?(
+                  <div className="flex gap-1 shrink-0">
+                    <button onClick={()=>unban(b.id)} disabled={actionLoading===b.id} className="text-xs bg-[#2176d4] text-white px-2 py-1 rounded-lg font-bold disabled:opacity-50">{actionLoading===b.id?'...':'Ja'}</button>
+                    <button onClick={()=>setConfirmUnban(null)} className="text-xs border border-[#333] text-gray-400 px-2 py-1 rounded-lg font-bold">Nee</button>
+                  </div>
+                ):(
+                  <button onClick={()=>setConfirmUnban(b.id)}
+                    className="shrink-0 px-3 py-1.5 border border-[#2a2a2a] text-gray-400 rounded-lg text-xs font-medium hover:bg-white/5 transition-colors">
+                    Ontbannen
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <WaitlistSection slug={session.slug}/>
     </div>
   )
 }
 
 /* ─── SettingsView ───────────────────────────────────────── */
 function SettingsView({session}:{session:Session}){
-  const[instellingen,setInstellingen]=useState<Record<string,unknown>|null>(null)
-  const[loading,setLoading]=useState(true)
-  const[schedule,setSchedule]=useState<Record<string,DayConfig>>(DEFAULT_SCHEDULE)
-  const[blocked,setBlocked]=useState<string[]>([])
-  const[savingSched,setSavingSched]=useState(false)
-  const[savedSched,setSavedSched]=useState(false)
-  const[currentPw,setCurrentPw]=useState('')
-  const[newPw,setNewPw]=useState('')
-  const[confirmPw,setConfirmPw]=useState('')
-  const[pwLoading,setPwLoading]=useState(false)
-  const[pwError,setPwError]=useState('')
-  const[pwOk,setPwOk]=useState(false)
+  const[daySchedule,setDaySchedule]=useState<Record<string,DayConfig>>(DEFAULT_SCHEDULE)
+  const[blockedDates,setBlockedDates]=useState<string[]>([])
+  const[currentPw,setCurrentPw]=useState('');const[newPw,setNewPw]=useState('');const[confirmPw,setConfirmPw]=useState('')
+  const[msgs,setMsgs]=useState<Record<string,string>>({})
+  const[errs,setErrs]=useState<Record<string,string>>({})
+  const[saving,setSaving]=useState<Record<string,boolean>>({})
 
   useEffect(()=>{
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
-      const inst=d.instellingen??{}
-      setInstellingen(inst)
-      if(inst.schema)setSchedule({...DEFAULT_SCHEDULE,...(JSON.parse(inst.schema as string) as Record<string,DayConfig>)})
-      if(inst.geblokkeerde_datums)setBlocked(JSON.parse(inst.geblokkeerde_datums as string) as string[])
-      setLoading(false)
+      const s=d.instellingen??{}
+      if(s.schema){
+        const parsed:Record<string,DayConfig>=JSON.parse(s.schema as string)
+        for(const day of Object.keys(parsed))parsed[day]={...parsed[day],breaks:parsed[day].breaks??[]}
+        setDaySchedule(parsed)
+      }
+      if(s.geblokkeerde_datums)setBlockedDates(JSON.parse(s.geblokkeerde_datums as string) as string[])
     })
   },[])
 
-  async function saveSchedule(){
-    setSavingSched(true)
-    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'schema',value:schedule})})
-    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'geblokkeerde_datums',value:blocked})})
-    setSavingSched(false);setSavedSched(true);setTimeout(()=>setSavedSched(false),2000)
+  async function save(key:string,value:string,section:string){
+    setSaving(s=>({...s,[section]:true}))
+    setMsgs(m=>({...m,[section]:''}));setErrs(e=>({...e,[section]:''}))
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})})
+    setSaving(s=>({...s,[section]:false}));setMsgs(m=>({...m,[section]:'Opgeslagen'}))
+    setTimeout(()=>setMsgs(m=>({...m,[section]:''})),3000)
   }
 
-  async function changePassword(){
-    if(newPw!==confirmPw){setPwError('Wachtwoorden komen niet overeen');return}
-    if(newPw.length<6){setPwError('Minimaal 6 tekens');return}
-    setPwError('');setPwLoading(true)
-    const check=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:session.email,wachtwoord:currentPw})})
-    if(!check.ok){setPwError('Huidig wachtwoord onjuist');setPwLoading(false);return}
-    const r=await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'wachtwoord',value:newPw})})
-    if(r.ok){setPwOk(true);setCurrentPw('');setNewPw('');setConfirmPw('');setTimeout(()=>setPwOk(false),3000)}
-    else{const d=await r.json();setPwError(d.error??'Fout bij wijzigen')}
-    setPwLoading(false)
+  async function changePw(e:React.FormEvent){
+    e.preventDefault();setErrs(x=>({...x,pw:''}));setMsgs(m=>({...m,pw:''}))
+    if(newPw!==confirmPw){setErrs(x=>({...x,pw:'Wachtwoorden komen niet overeen'}));return}
+    if(newPw.length<6){setErrs(x=>({...x,pw:'Minimaal 6 tekens'}));return}
+    setSaving(s=>({...s,pw:true}))
+    const lr=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:session.email,wachtwoord:currentPw})})
+    if(!lr.ok){setErrs(x=>({...x,pw:'Huidig wachtwoord onjuist'}));setSaving(s=>({...s,pw:false}));return}
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'wachtwoord',value:newPw})})
+    setSaving(s=>({...s,pw:false}));setMsgs(m=>({...m,pw:'Wachtwoord gewijzigd'}))
+    setCurrentPw('');setNewPw('');setConfirmPw('')
+    setTimeout(()=>setMsgs(m=>({...m,pw:''})),3000)
   }
 
-  function updateDay(dow:string,field:keyof DayConfig,val:unknown){
-    setSchedule(s=>({...s,[dow]:{...s[dow],[field]:val}}))
+  function updateDay(day:string,patch:Partial<DayConfig>){
+    setDaySchedule(s=>({...s,[day]:{...s[day],...patch}}))
   }
-  function addBreak(dow:string){
-    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:[...s[dow].breaks,{start:'12:00',end:'13:00'}]}}))
+  function addBreak(day:string){
+    setDaySchedule(s=>({...s,[day]:{...s[day],breaks:[...(s[day].breaks??[]),{start:'12:00',end:'13:00'}]}}))
   }
-  function removeBreak(dow:string,i:number){
-    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:s[dow].breaks.filter((_,j)=>j!==i)}}))
+  function removeBreak(day:string,i:number){
+    setDaySchedule(s=>({...s,[day]:{...s[day],breaks:(s[day].breaks??[]).filter((_,j)=>j!==i)}}))
   }
-  function updateBreak(dow:string,i:number,field:'start'|'end',val:string){
-    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:s[dow].breaks.map((b,j)=>j===i?{...b,[field]:val}:b)}}))
+  function updateBreak(day:string,i:number,patch:Partial<BreakSlot>){
+    setDaySchedule(s=>({...s,[day]:{...s[day],breaks:(s[day].breaks??[]).map((b,j)=>j===i?{...b,...patch}:b)}}))
   }
 
-  if(loading)return<div className="flex justify-center py-20"><div className="w-8 h-8 border-3 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+  const timeOptions:string[]=[]
+  for(let h=6;h<=23;h++)for(let m=0;m<60;m+=30)
+    timeOptions.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`)
+  const timeOptions15:string[]=[]
+  for(let h=6;h<=23;h++)for(let m=0;m<60;m+=15)
+    timeOptions15.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`)
+
+  const dayOrder=['1','2','3','4','5','6','0']
+
   return(
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
-      <h2 className="text-2xl font-black text-white" style={{fontFamily:'var(--font-bebas)'}}>Instellingen</h2>
+    <div className="max-w-2xl space-y-6">
+      <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Instellingen</h1>
 
-      {/* Weekschema */}
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
-        <h3 className="text-base font-bold text-white mb-4">Weekschema</h3>
-        <div className="space-y-4">
-          {Object.entries(schedule).map(([dow,cfg])=>(
-            <div key={dow}>
-              <div className="flex items-center gap-3 mb-2">
-                <Toggle on={cfg.open} onChange={v=>updateDay(dow,'open',v)}/>
-                <span className="text-white font-bold text-sm w-24">{NL_DAY_LABELS[dow]}</span>
-                {cfg.open&&(
-                  <>
-                    <input type="time" value={cfg.start} onChange={e=>updateDay(dow,'start',e.target.value)}
-                      className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-[#2176d4]"/>
-                    <span className="text-gray-500 text-sm">–</span>
-                    <input type="time" value={cfg.end} onChange={e=>updateDay(dow,'end',e.target.value)}
-                      className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-[#2176d4]"/>
-                    <button type="button" onClick={()=>addBreak(dow)}
-                      className="ml-2 px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-xs text-gray-400 hover:text-white hover:border-[#2176d4] transition-colors">
+      {/* Beschikbaarheid & Werktijden */}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-1">Beschikbaarheid &amp; Werktijden</h2>
+        <p className="text-xs text-gray-500 mb-4">Zet dagen aan/uit en stel per dag uw begin- en eindtijd in</p>
+        <div className="space-y-2 mb-4">
+          {dayOrder.map(day=>{
+            const cfg=daySchedule[day]
+            const dayBreakList=cfg.breaks??[]
+            return(
+              <div key={day} className={`rounded-xl border-2 transition-colors ${cfg.open?'border-[#2176d4]/20 bg-[#2176d4]/5':'border-[#1e1e1e] bg-[#111]'}`}>
+                <div className="flex items-center gap-3 p-3">
+                  <Toggle value={cfg.open} onChange={v=>updateDay(day,{open:v})}/>
+                  <span className={`font-bold text-sm w-20 shrink-0 ${cfg.open?'text-white':'text-gray-600'}`}>{NL_DAY_LABELS[day]}</span>
+                  {cfg.open?(
+                    <div className="flex items-center gap-2 flex-1 flex-wrap">
+                      <select value={cfg.start} onChange={e=>updateDay(day,{start:e.target.value})}
+                        className="bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-[#2176d4] transition-colors">
+                        {timeOptions.map(t=><option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <span className="text-gray-500 font-bold text-sm">→</span>
+                      <select value={cfg.end} onChange={e=>updateDay(day,{end:e.target.value})}
+                        className="bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-[#2176d4] transition-colors">
+                        {[...timeOptions.filter(t=>t>cfg.start),'00:00'].map(t=><option key={t} value={t}>{t==='00:00'?'00:00 (middernacht)':t}</option>)}
+                      </select>
+                    </div>
+                  ):(
+                    <span className="text-gray-600 text-sm font-medium italic flex-1">Gesloten</span>
+                  )}
+                  {cfg.open&&(
+                    <button onClick={()=>addBreak(day)}
+                      className="shrink-0 px-2.5 py-1 bg-amber-900/20 border border-amber-700/30 text-amber-400 rounded-lg text-xs font-bold hover:bg-amber-900/30 transition-colors">
                       + Pauze
                     </button>
-                  </>
+                  )}
+                </div>
+                {cfg.open&&dayBreakList.length>0&&(
+                  <div className="px-3 pb-3 space-y-2">
+                    {dayBreakList.map((brk,i)=>(
+                      <div key={i} className="flex items-center gap-2 ml-7">
+                        <span className="text-amber-400/60 text-xs font-bold shrink-0">Pauze</span>
+                        <select value={brk.start} onChange={e=>updateBreak(day,i,{start:e.target.value})}
+                          className="bg-[#1a1a1a] border-2 border-amber-700/30 text-white rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-amber-500 transition-colors">
+                          {timeOptions15.map(t=><option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <span className="text-gray-500 font-bold text-sm">→</span>
+                        <select value={brk.end} onChange={e=>updateBreak(day,i,{end:e.target.value})}
+                          className="bg-[#1a1a1a] border-2 border-amber-700/30 text-white rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-amber-500 transition-colors">
+                          {timeOptions15.filter(t=>t>brk.start).map(t=><option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <button onClick={()=>removeBreak(day,i)}
+                          className="w-7 h-7 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors text-lg leading-none">×</button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-              {cfg.open&&cfg.breaks.map((br,i)=>(
-                <div key={i} className="flex items-center gap-2 ml-16 mb-1">
-                  <span className="text-xs text-gray-500">Pauze:</span>
-                  <input type="time" value={br.start} onChange={e=>updateBreak(dow,i,'start',e.target.value)}
-                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-[#2176d4]"/>
-                  <span className="text-gray-500 text-xs">–</span>
-                  <input type="time" value={br.end} onChange={e=>updateBreak(dow,i,'end',e.target.value)}
-                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-[#2176d4]"/>
-                  <button type="button" onClick={()=>removeBreak(dow,i)} className="text-red-400 hover:text-red-300 text-xs ml-1">✕</button>
-                </div>
-              ))}
-            </div>
-          ))}
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-3 mt-4">
+          <button onClick={()=>save('schema',JSON.stringify(daySchedule),'schedule')} disabled={saving.schedule}
+            className="px-5 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">
+            {saving.schedule?'Opslaan...':'Opslaan'}
+          </button>
+          {msgs.schedule&&<span className="text-[#2176d4] text-sm">{msgs.schedule}</span>}
         </div>
       </div>
 
-      {/* Geblokkeerde datums */}
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
-        <h3 className="text-base font-bold text-white mb-4">Geblokkeerde datums</h3>
-        <BlockedCalendar blocked={blocked} onChange={setBlocked}/>
-        {blocked.length>0&&(
-          <div className="mt-3 flex flex-wrap gap-2">
-            {blocked.sort().map(d=>(
-              <span key={d} className="flex items-center gap-1.5 bg-red-600/20 text-red-400 rounded-lg px-2 py-1 text-xs font-medium">
-                {formatMedDate(d)}
-                <button onClick={()=>setBlocked(b=>b.filter(x=>x!==d))} className="hover:text-red-300">✕</button>
+      {/* Vrije dagen / Vakantie */}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-1">Vrije dagen / Vakantie</h2>
+        <p className="text-xs text-gray-500 mb-4">Klik op meerdere datums om ze te blokkeren — klik opnieuw om te deblokkeren</p>
+        <BlockedCalendar blocked={blockedDates} onChange={setBlockedDates}/>
+        {blockedDates.length>0&&(
+          <div className="mt-4 flex flex-wrap gap-2">
+            {blockedDates.map(d=>(
+              <span key={d} className="inline-flex items-center gap-1 bg-red-900/20 border border-red-800/40 text-red-400 text-xs px-3 py-1.5 rounded-lg">
+                {formatShortDate(d)}
+                <button onClick={()=>setBlockedDates(prev=>prev.filter(x=>x!==d))}
+                  className="ml-1 text-red-500 hover:text-red-300 font-black leading-none">×</button>
               </span>
             ))}
           </div>
         )}
+        <div className="flex items-center gap-3 mt-4">
+          <button onClick={()=>save('geblokkeerde_datums',JSON.stringify(blockedDates),'blocked')} disabled={saving.blocked}
+            className="px-5 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">
+            {saving.blocked?'Opslaan...':'Opslaan'}
+          </button>
+          {msgs.blocked&&<span className="text-[#2176d4] text-sm">{msgs.blocked}</span>}
+        </div>
       </div>
 
-      <button onClick={saveSchedule} disabled={savingSched}
-        className="w-full py-3 bg-[#2176d4] text-white rounded-2xl font-black text-base hover:bg-[#3080e0] transition-colors disabled:opacity-50">
-        {savingSched?'Opslaan...':savedSched?'Opgeslagen ✓':'Schema opslaan'}
-      </button>
-
-      {/* Export */}
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
-        <h3 className="text-base font-bold text-white mb-1">Export</h3>
-        <p className="text-sm text-gray-400 mb-3">Download alle komende afspraken als ICS-bestand.</p>
-        <a href="/api/portaal/export" download className="inline-block px-4 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-white rounded-xl text-sm font-bold hover:bg-[#2a2a2a] transition-colors">
-          Exporteer ICS
-        </a>
-        <div className="mt-4 pt-4 border-t border-[#2a2a2a]">
+      {/* Exporteren */}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-1">Exporteren</h2>
+        <p className="text-xs text-gray-500 mb-4">Download uw agenda als kalenderbestand</p>
+        <div className="flex items-center justify-between py-3 border border-[#2a2a2a] rounded-xl px-4">
+          <div>
+            <p className="font-bold text-white text-sm">Exporteer alle afspraken</p>
+            <p className="text-xs text-[#2176d4] font-medium">Download als .ics kalenderbestand</p>
+          </div>
+          <a href="/api/portaal/export" download className="bg-[#2176d4] text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-[#3080e0] transition-colors">Downloaden</a>
+        </div>
+        <div className="mt-3">
           <CalendarSubscribeButton/>
         </div>
       </div>
 
       {/* Wachtwoord */}
-      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
-        <h3 className="text-base font-bold text-white mb-4">Wachtwoord wijzigen</h3>
-        <div className="space-y-3">
-          <input type="password" value={currentPw} onChange={e=>setCurrentPw(e.target.value)} placeholder="Huidig wachtwoord"
-            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
-          <input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="Nieuw wachtwoord"
-            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
-          <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="Bevestig nieuw wachtwoord"
-            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
-          {pwError&&<p className="text-red-400 text-xs">{pwError}</p>}
-          {pwOk&&<p className="text-green-400 text-xs">Wachtwoord gewijzigd</p>}
-          <button onClick={changePassword} disabled={pwLoading||!currentPw||!newPw||!confirmPw}
-            className="w-full py-2.5 bg-[#2176d4] text-white rounded-xl text-sm font-bold hover:bg-[#3080e0] transition-colors disabled:opacity-50">
-            {pwLoading?'Bezig...':'Wijzigen'}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-4">Wachtwoord wijzigen</h2>
+        <form onSubmit={changePw} className="space-y-4">
+          {errs.pw&&<div className="bg-red-900/30 border border-red-700/50 text-red-400 rounded-xl px-4 py-3 text-sm font-semibold">{errs.pw}</div>}
+          {msgs.pw&&<div className="bg-[#2176d4]/10 border border-[#2176d4]/20 text-[#2176d4] rounded-xl px-4 py-3 text-sm font-semibold">{msgs.pw}</div>}
+          {[{label:'Huidig wachtwoord',val:currentPw,set:setCurrentPw},{label:'Nieuw wachtwoord',val:newPw,set:setNewPw},{label:'Bevestig nieuw',val:confirmPw,set:setConfirmPw}].map(f=>(
+            <div key={f.label}>
+              <label className="block text-sm font-bold text-gray-400 mb-1">{f.label}</label>
+              <input type="password" required value={f.val} onChange={e=>f.set(e.target.value)}
+                className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+            </div>
+          ))}
+          <button type="submit" disabled={saving.pw}
+            className="px-5 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">
+            {saving.pw?'Opslaan...':'Wachtwoord wijzigen'}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   )

@@ -194,8 +194,8 @@ export async function PATCH(req: NextRequest) {
       const blocked: string[] = JSON.parse(settings.geblokkeerde_datums)
       if (blocked.includes(datum)) return Response.json({ error: 'Dit tijdslot is al bezet' }, { status: 409 })
     }
-    if (settings.day_schedule) {
-      const sched: WeekSchedule = JSON.parse(settings.day_schedule)
+    if (settings.schema) {
+      const sched: WeekSchedule = JSON.parse(settings.schema)
       const cfg = sched[String(dow)]
       if (!cfg?.open) return Response.json({ error: 'Dit tijdslot is al bezet' }, { status: 409 })
       const [wsh, wsm] = (cfg.start ?? '09:00').split(':').map(Number)
