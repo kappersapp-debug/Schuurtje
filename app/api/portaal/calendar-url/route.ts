@@ -27,11 +27,10 @@ export async function GET(req: NextRequest) {
     const { data: barber } = await supabaseAdmin.from('barbers').select('id, naam').eq('slug', slugParam).single()
     if (!barber) return new Response('Not found', { status: 404 })
 
-    const today = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).split(' ')[0]
     const { data: bookings } = await supabaseAdmin
       .from('bookings').select('code, naam, service, prijs, datum, tijd, duur, telefoon')
       .eq('barber_id', barber.id).eq('geannuleerd', false)
-      .gte('datum', today).order('datum').order('tijd')
+      .order('datum').order('tijd')
 
     const now = fmt(new Date())
     const events = (bookings ?? []).map(b => {
