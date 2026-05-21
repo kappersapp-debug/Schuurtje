@@ -1,64 +1,1418 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 
-export default function PortaalLogin() {
-  const router = useRouter()
-  const [email, setEmail] = useState('')
-  const [wachtwoord, setWachtwoord] = useState('')
-  const [fout, setFout] = useState('')
-  const [laden, setLaden] = useState(false)
+/* ─── Types ──────────────────────────────────────────────── */
+interface Afspraak {
+  id: string; code: string; naam: string; telefoon: string; email: string
+  service: string; prijs: number; duur: number; datum: string; tijd: string
+  created_at: string; notities?: string; no_show?: boolean
+}
+interface WachtlijstEntry { id: string; naam: string; telefoon: string; email: string; datum: string; service: string; created_at: string }
+interface GebandEmail { id: string; email: string; reden: string; created_at: string }
+interface Klant { email: string; naam: string; bezoeken: number; totaalBesteed: number; lastDate: string; lastService: string; afspraken: {code:string;service:string;prijs:number;datum:string;tijd:string}[] }
+interface Session { id: string; naam: string; slug: string; email: string; exp: number }
+interface Stats { vandaag: number; week: number; weekOmzet: number; totaalKlanten: number; vandaagAfspraken: Afspraak[] }
+type BreakSlot = { start: string; end: string }
+type DayConfig = { open: boolean; start: string; end: string; breaks: BreakSlot[] }
+const DEFAULT_SCHEDULE: Record<string, DayConfig> = {
+  '0':{open:false,start:'09:00',end:'17:00',breaks:[]},
+  '1':{open:true, start:'09:00',end:'17:00',breaks:[]},
+  '2':{open:true, start:'09:00',end:'17:00',breaks:[]},
+  '3':{open:true, start:'09:00',end:'17:00',breaks:[]},
+  '4':{open:true, start:'09:00',end:'17:00',breaks:[]},
+  '5':{open:true, start:'09:00',end:'17:00',breaks:[]},
+  '6':{open:false,start:'09:00',end:'17:00',breaks:[]},
+}
 
-  async function login(e: React.FormEvent) {
-    e.preventDefault()
-    setLaden(true)
-    setFout('')
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, wachtwoord }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setFout(data.error ?? 'Inloggen mislukt'); return }
-      router.push('/portaal/dashboard')
-    } finally {
-      setLaden(false)
-    }
+/* ─── Helpers ────────────────────────────────────────────── */
+const NL_MONTHS_SHORT = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec']
+const NL_MONTHS_LONG  = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']
+const NL_DAYS_SHORT   = ['Ma','Di','Wo','Do','Vr','Za','Zo']
+const NL_DAYS_LONG    = ['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag']
+const NL_DAY_LABELS: Record<string,string> = {'0':'Zondag','1':'Maandag','2':'Dinsdag','3':'Woensdag','4':'Donderdag','5':'Vrijdag','6':'Zaterdag'}
+
+function toDateStr(d: Date) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+function formatShortDate(ds: string) { const d=new Date(ds+'T12:00:00'); return `${NL_DAYS_SHORT[(d.getDay()+6)%7]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` }
+function formatLongDate(ds: string) { const d=new Date(ds+'T12:00:00'); return `${NL_DAYS_LONG[d.getDay()]} ${d.getDate()} ${NL_MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}` }
+function formatMedDate(ds: string) { const d=new Date(ds+'T12:00:00'); return `${NL_DAYS_SHORT[(d.getDay()+6)%7]} ${d.getDate()} ${NL_MONTHS_SHORT[d.getMonth()]}` }
+function getStatus(date: string): 'today'|'upcoming'|'past' { const t=new Date().toISOString().split('T')[0]; if(date===t)return'today'; return date>t?'upcoming':'past' }
+function serviceInitial(s: string) { if(s.toLowerCase().includes('baard')&&s.toLowerCase().includes('knip'))return'KB'; if(s.toLowerCase().includes('baard'))return'B'; return'K' }
+function toMins(t: string) { const[h,m]=t.split(':').map(Number); return h===0&&m===0?1440:h*60+m }
+function generateWorkSlots(start='09:00',end='17:00') {
+  const s=toMins(start),e=toMins(end),slots:string[]=[]
+  for(let m=s;m<e;m+=15) slots.push(`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`)
+  return slots
+}
+function isBreak(slot: string, breaks: BreakSlot[]) {
+  const[sh,sm]=slot.split(':').map(Number); const sMin=sh*60+sm
+  return breaks.some(b=>{ const[bsh,bsm]=b.start.split(':').map(Number),[beh,bem]=b.end.split(':').map(Number); return sMin>=bsh*60+bsm&&sMin<beh*60+bem })
+}
+
+type View = 'dashboard'|'calendar'|'appointments'|'customers'|'services'|'management'|'settings'
+
+const NAV_ICONS: Record<string,React.ReactNode> = {
+  dashboard:    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>,
+  calendar:     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>,
+  appointments: <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>,
+  services:     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>,
+  customers:    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>,
+  management:   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>,
+  settings:     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>,
+}
+const NAV: {id:View;label:string}[] = [
+  {id:'dashboard',label:'Dashboard'},{id:'calendar',label:'Agenda'},{id:'appointments',label:'Afspraken'},
+  {id:'customers',label:'Klanten'},{id:'services',label:'Diensten'},{id:'management',label:'Beheer'},{id:'settings',label:'Instellingen'},
+]
+
+function AnimatedNumber({value}:{value:number|string}) {
+  const[display,setDisplay]=useState<number|string>(typeof value==='number'?0:value)
+  useEffect(()=>{
+    if(typeof value!=='number'){setDisplay(value);return}
+    let cur=0; const step=Math.max(1,Math.ceil(value/25))
+    const t=setInterval(()=>{ cur=Math.min(cur+step,value); setDisplay(cur); if(cur>=value)clearInterval(t) },40)
+    return()=>clearInterval(t)
+  },[value])
+  return<>{display}</>
+}
+
+function CalendarSubscribeButton() {
+  const[url,setUrl]=useState<string|null>(null)
+  useEffect(()=>{ fetch('/api/portaal/calendar-url').then(r=>r.json()).then(d=>{if(d.url)setUrl(d.url)}).catch(()=>{}) },[])
+  if(!url)return null
+  return <a href={url} title="Abonneer op agenda" className="px-4 py-2 border border-[#2a2a2a] text-gray-400 rounded-xl font-bold text-sm hover:border-[#2176d4]/50 hover:text-white transition-all">📅 Agenda</a>
+}
+
+/* ─── Login ──────────────────────────────────────────────── */
+function LoginScreen({onLogin}:{onLogin:()=>void}) {
+  const[email,setEmail]=useState('');const[ww,setWw]=useState('');const[error,setError]=useState('');const[loading,setLoading]=useState(false);const[show,setShow]=useState(false)
+  async function submit(e:React.FormEvent){
+    e.preventDefault();setError('');setLoading(true)
+    try{
+      const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,wachtwoord:ww})})
+      const d=await r.json()
+      if(!r.ok){setError(d.error??'Inloggen mislukt');return}
+      onLogin()
+    }catch{setError('Netwerkfout')}finally{setLoading(false)}
   }
-
-  return (
-    <main className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold mb-8 text-center">Kappers portaal</h1>
-        <form onSubmit={login} className="space-y-4">
-          <input
-            type="email"
-            placeholder="E-mailadres"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full border border-zinc-200 rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-900"
-          />
-          <input
-            type="password"
-            placeholder="Wachtwoord"
-            value={wachtwoord}
-            onChange={(e) => setWachtwoord(e.target.value)}
-            required
-            className="w-full border border-zinc-200 rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-900"
-          />
-          {fout && <p className="text-red-500 text-sm">{fout}</p>}
-          <button
-            type="submit"
-            disabled={laden}
-            className="w-full py-3 rounded-xl bg-zinc-900 text-white font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-          >
-            {laden ? 'Inloggen...' : 'Inloggen'}
-          </button>
+  return(
+    <div className="min-h-screen bg-[#0c0c0c] flex items-center justify-center px-4">
+      <div className="w-full max-w-sm bg-[#141414] rounded-xl shadow-xl border border-[#2a2a2a] overflow-hidden">
+        <div className="bg-[#111] px-8 py-8 text-center border-b border-[#1e1e1e]">
+          <div className="w-16 h-16 rounded-full bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center mx-auto mb-3">
+            <svg className="w-8 h-8 text-[#2176d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          </div>
+          <h1 className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-xl">Schuurtje</h1>
+          <p className="text-gray-500 text-xs mt-0.5">Kapper Portaal</p>
+        </div>
+        <form onSubmit={submit} className="p-8">
+          <h2 className="text-lg font-black text-white mb-6 text-center">Inloggen</h2>
+          {error&&<div className="bg-red-900/30 border border-red-700/50 text-red-400 rounded-xl px-4 py-3 mb-4 text-sm font-semibold">{error}</div>}
+          <div className="mb-4">
+            <label className="block text-sm font-bold text-gray-400 mb-1">E-mailadres</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-4 py-3 font-medium focus:outline-none focus:border-[#2176d4] transition-colors"/>
+          </div>
+          <div className="mb-5">
+            <label className="block text-sm font-bold text-gray-400 mb-1">Wachtwoord</label>
+            <div className="relative">
+              <input type={show?'text':'password'} value={ww} onChange={e=>setWw(e.target.value)} required className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-4 py-3 pr-12 font-medium focus:outline-none focus:border-[#2176d4] transition-colors"/>
+              <button type="button" onClick={()=>setShow(s=>!s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs font-medium hover:text-gray-300">{show?'Verberg':'Toon'}</button>
+            </div>
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">{loading?'Bezig...':'Inloggen'}</button>
         </form>
       </div>
-    </main>
+    </div>
   )
+}
+
+/* ─── Shell ──────────────────────────────────────────────── */
+function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
+  const[view,setView]=useState<View>('dashboard')
+  const[moreOpen,setMoreOpen]=useState(false)
+  const[notifications,setNotifications]=useState<(Afspraak&{_type:string})[]>([])
+  const[unreadCount,setUnreadCount]=useState(0)
+  const[notifOpen,setNotifOpen]=useState(false)
+  const[toast,setToast]=useState<string|null>(null)
+  const[waitlistCount,setWaitlistCount]=useState(0)
+  const lastCheckedRef=useRef('')
+  const notifBtnRef=useRef<HTMLButtonElement>(null)
+  const[panelStyle,setPanelStyle]=useState<React.CSSProperties>({top:56,right:16})
+
+  useEffect(()=>{
+    const stored=localStorage.getItem('sch_notif_last_checked')
+    lastCheckedRef.current=stored??new Date(Date.now()-60*60*1000).toISOString()
+    const poll=async()=>{
+      try{
+        const r=await fetch(`/api/afspraken?since=${encodeURIComponent(lastCheckedRef.current)}`)
+        lastCheckedRef.current=new Date().toISOString()
+        localStorage.setItem('sch_notif_last_checked',lastCheckedRef.current)
+        if(!r.ok)return
+        const d=await r.json()
+        const now=new Date()
+        const todayStr=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+        const nowMins=now.getHours()*60+now.getMinutes()
+        const nieuwen=(d.afspraken??[]).filter((b:Afspraak)=>{
+          if(b.datum>todayStr)return true
+          if(b.datum===todayStr){const[h,m]=b.tijd.split(':').map(Number);return h*60+m>nowMins}
+          return false
+        })
+        const annuleringen:Afspraak[]=d.annuleringen??[]
+        if(nieuwen.length>0){
+          setNotifications(prev=>[...nieuwen.map((b:Afspraak)=>({...b,_type:'nieuw'})),...prev])
+          setUnreadCount(prev=>prev+nieuwen.length)
+          setToast(nieuwen.length===1?`Nieuwe afspraak: ${nieuwen[0].naam} – ${nieuwen[0].service}`:`${nieuwen.length} nieuwe afspraken`)
+        }
+        if(annuleringen.length>0){
+          setNotifications(prev=>[...annuleringen.map((b:Afspraak)=>({...b,_type:'geannuleerd'})),...prev])
+          setUnreadCount(prev=>prev+annuleringen.length)
+          setToast(annuleringen.length===1?`Geannuleerd: ${annuleringen[0].naam} – ${annuleringen[0].service}`:`${annuleringen.length} afspraken geannuleerd`)
+        }
+      }catch{/*ignore*/}
+    }
+    poll(); const id=setInterval(poll,30_000); return()=>clearInterval(id)
+  },[])
+
+  useEffect(()=>{
+    const go=async()=>{try{const r=await fetch('/api/wachtlijst');if(!r.ok)return;const d=await r.json();setWaitlistCount((d.wachtlijst??[]).length)}catch{/**/}}
+    go(); const id=setInterval(go,60_000); return()=>clearInterval(id)
+  },[])
+
+  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),5000);return()=>clearTimeout(t)},[toast])
+  useEffect(()=>{
+    if(!notifOpen)return
+    const h=(e:MouseEvent)=>{const p=document.getElementById('notif-panel');if(p&&!p.contains(e.target as Node))setNotifOpen(false)}
+    document.addEventListener('mousedown',h); return()=>document.removeEventListener('mousedown',h)
+  },[notifOpen])
+
+  function openNotifDesktop(){
+    if(notifBtnRef.current){const r=notifBtnRef.current.getBoundingClientRect();setPanelStyle({bottom:window.innerHeight-r.top+4,left:r.right+8})}
+    setNotifOpen(o=>!o); setUnreadCount(0)
+  }
+  function openNotifMobile(){setPanelStyle({bottom:72,right:16});setNotifOpen(o=>!o);setUnreadCount(0)}
+
+  return(
+    <div className="min-h-screen flex bg-[#0c0c0c] font-[family-name:var(--font-barlow)]">
+      {notifOpen&&(
+        <div id="notif-panel" style={panelStyle} className="fixed z-50 w-[calc(100vw-32px)] sm:w-72 bg-[#141414] rounded-xl shadow-2xl border border-[#2a2a2a] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-[#1e1e1e] flex items-center justify-between">
+            <span className="font-semibold text-white text-sm">Meldingen</span>
+            {notifications.length>0&&<button onClick={()=>{const c=notifications.length;setNotifications([]);setNotifOpen(false);setToast(`${c} melding${c===1?'':'en'} gewist`)}} className="text-xs text-[#2176d4] hover:underline">Wis alles</button>}
+          </div>
+          {notifications.length===0?<p className="px-4 py-6 text-sm text-gray-500 text-center">Geen nieuwe meldingen</p>:(
+            <div className="max-h-72 overflow-y-auto divide-y divide-[#1e1e1e]">
+              {notifications.map(n=>(
+                <div key={n.id+n._type} className={`px-4 py-3 hover:bg-white/5 border-l-2 ${n._type==='geannuleerd'?'border-red-500':'border-[#2176d4]'}`}>
+                  <p className="font-semibold text-sm text-white">{n.naam}</p>
+                  <p className="text-xs text-gray-500">{n.service} · {formatMedDate(n.datum)} · {n.tijd}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {toast&&(
+        <div className="fixed top-16 right-4 lg:top-4 lg:right-6 z-50 bg-[#2176d4] text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-xs">
+          <div className="flex-1 min-w-0"><p className="font-bold text-sm">Nieuwe melding</p><p className="text-xs text-white/70 truncate">{toast}</p></div>
+          <button onClick={()=>setToast(null)} className="text-white/50 hover:text-white shrink-0 leading-none text-lg">×</button>
+        </div>
+      )}
+      <aside className="hidden lg:flex flex-col w-60 bg-[#0e0e0e] min-h-screen fixed left-0 top-0 z-30 border-r border-[#1e1e1e]">
+        <div className="px-6 py-5 border-b border-[#1e1e1e] flex items-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-[#2176d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          </div>
+          <div>
+            <div className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-lg leading-none">{session.naam}</div>
+            <p className="text-gray-600 text-[10px] mt-0.5 tracking-wider uppercase">Kapper Portaal</p>
+          </div>
+        </div>
+        <nav className="flex-1 py-3 space-y-0.5 px-3">
+          {NAV.map(n=>(
+            <button key={n.id} onClick={()=>setView(n.id)} className={['flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-200',view===n.id?'bg-[#2176d4]/12 text-[#2176d4] font-semibold shadow-[inset_0_0_0_1px_rgba(33,118,212,0.2)]':'text-gray-500 hover:bg-white/4 hover:text-gray-200'].join(' ')}>
+              <span className={view===n.id?'text-[#2176d4]':'text-gray-600'}>{NAV_ICONS[n.id]}</span>{n.label}
+            </button>
+          ))}
+          <button ref={notifBtnRef} onClick={openNotifDesktop} className={['flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-200',notifOpen?'bg-[#2176d4]/12 text-[#2176d4] font-semibold shadow-[inset_0_0_0_1px_rgba(33,118,212,0.2)]':'text-gray-500 hover:bg-white/4 hover:text-gray-200'].join(' ')}>
+            <span className={`relative ${notifOpen?'text-[#2176d4]':'text-gray-600'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+              {unreadCount>0&&<span className="animate-pulse-ring absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 opacity-70"/>}
+            </span>
+            <span className="flex-1 text-left">Meldingen</span>
+            {unreadCount>0&&<span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1 leading-none">{unreadCount>9?'9+':unreadCount}</span>}
+          </button>
+        </nav>
+        <div className="px-3 pb-4">
+          <button onClick={onLogout} className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl border border-[#1e1e1e] text-gray-500 text-sm hover:bg-white/4 hover:text-gray-300 hover:border-[#2a2a2a] transition-all duration-200">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg>
+            Uitloggen
+          </button>
+        </div>
+      </aside>
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-[#0e0e0e] px-4 h-14 flex items-center justify-between border-b border-[#1e1e1e]">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center">
+            <svg className="w-4 h-4 text-[#2176d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          </div>
+          <span className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-base">{session.naam}</span>
+        </div>
+        <button onClick={openNotifMobile} className="relative w-9 h-9 flex items-center justify-center text-gray-400 hover:text-white transition-colors">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+          {unreadCount>0&&<span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-[#0e0e0e]"/>}
+        </button>
+      </div>
+      {moreOpen&&(
+        <div className="lg:hidden fixed inset-0 z-40 bg-black/70 animate-fade-in" onClick={()=>setMoreOpen(false)}>
+          <div className="absolute bottom-16 left-0 right-0 bg-[#0e0e0e] rounded-t-2xl border-t border-[#1e1e1e] px-4 pt-4 pb-6 animate-fade-up" onClick={e=>e.stopPropagation()}>
+            <div className="w-10 h-1 rounded-full bg-[#333] mx-auto mb-5"/>
+            <div className="space-y-0.5">
+              {(['services','management','settings'] as View[]).map(id=>{
+                const n=NAV.find(n=>n.id===id)!
+                return <button key={id} onClick={()=>{setView(id);setMoreOpen(false)}} className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm transition-all ${view===id?'bg-[#2176d4]/12 text-[#2176d4] font-semibold':'text-gray-400 hover:bg-white/5 hover:text-white'}`}><span className={view===id?'text-[#2176d4]':'text-gray-600'}>{NAV_ICONS[id]}</span>{n.label}</button>
+              })}
+              <div className="my-2 border-t border-[#1e1e1e]"/>
+              <button onClick={onLogout} className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm text-red-400 hover:bg-red-900/10 transition-all">
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg>
+                Uitloggen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0e0e0e] border-t border-[#1e1e1e] flex flex-col" style={{paddingBottom:'env(safe-area-inset-bottom,0px)'}}>
+        <div className="flex h-16">
+          {(['dashboard','calendar','appointments','customers'] as View[]).map(id=>{
+            const n=NAV.find(n=>n.id===id)!; const active=view===id
+            return <button key={id} onClick={()=>{setView(id);setMoreOpen(false)}} className={`flex-1 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-colors ${active?'text-[#2176d4]':'text-gray-600 hover:text-gray-400'}`}><span className={active?'text-[#2176d4]':'text-gray-600'}>{NAV_ICONS[id]}</span>{n.label==='Dashboard'?'Home':n.label}</button>
+          })}
+          <button onClick={()=>setMoreOpen(o=>!o)} className={`flex-1 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-colors ${moreOpen||['services','management','settings'].includes(view)?'text-[#2176d4]':'text-gray-600 hover:text-gray-400'}`}>
+            <span className="relative">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"/></svg>
+              {waitlistCount>0&&<span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400"/>}
+            </span>
+            Meer
+          </button>
+        </div>
+      </nav>
+      <main className="flex-1 lg:ml-60 pt-14 lg:pt-0 min-h-screen pb-nav-safe">
+        <div className="p-4 sm:p-6 lg:p-8 max-w-5xl">
+          {view==='dashboard'&&<DashboardView onNavigate={setView} session={session}/>}
+          {view==='calendar'&&<CalendarView/>}
+          {view==='appointments'&&<AppointmentsView session={session}/>}
+          {view==='customers'&&<CustomersView/>}
+          {view==='services'&&<ServicesView/>}
+          {view==='management'&&<ManagementView session={session}/>}
+          {view==='settings'&&<SettingsView session={session}/>}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+/* ─── Dashboard ──────────────────────────────────────────── */
+function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:Session}) {
+  const[stats,setStats]=useState<Stats|null>(null)
+  const[upcoming,setUpcoming]=useState<Afspraak[]>([])
+  const[workSlots,setWorkSlots]=useState<string[]>(generateWorkSlots())
+  const[dayBreaks,setDayBreaks]=useState<BreakSlot[]>([])
+  const[waitlistCount,setWaitlistCount]=useState<number|null>(null)
+  const[lastUpdated,setLastUpdated]=useState('')
+
+  const loadDashboard=useCallback(()=>{
+    fetch('/api/portaal/stats').then(r=>r.json()).then(d=>setStats(d))
+    fetch('/api/afspraken?filter=upcoming').then(r=>r.json()).then(d=>{
+      const now=new Date(); const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+      const nowMins=now.getHours()*60+now.getMinutes()
+      const filtered=(d.afspraken??[]).filter((b:Afspraak)=>{
+        if(b.datum>today)return true
+        if(b.datum===today){const[h,m]=b.tijd.split(':').map(Number);return h*60+m>nowMins}
+        return false
+      })
+      setUpcoming(filtered.slice(0,5))
+    })
+    fetch('/api/wachtlijst').then(r=>r.json()).then(d=>setWaitlistCount((d.wachtlijst??[]).length))
+    setLastUpdated(new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'}))
+  },[])
+
+  useEffect(()=>{
+    loadDashboard()
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const s=d.instellingen??{}; const dow=String(new Date().getDay())
+      if(s.day_schedule){
+        const sched:Record<string,DayConfig>=JSON.parse(s.day_schedule); const cfg=sched[dow]
+        setWorkSlots(cfg?.open?generateWorkSlots(cfg.start,cfg.end):[])
+        setDayBreaks(cfg?.breaks??[])
+      } else setWorkSlots(generateWorkSlots(s.work_start??'09:00',s.work_end??'17:00'))
+    })
+    const id=setInterval(loadDashboard,60_000); return()=>clearInterval(id)
+  },[loadDashboard])
+
+  const today=new Date().toISOString().split('T')[0]
+  const nextAppt=(()=>{
+    const now=new Date(); const nowMins=now.getHours()*60+now.getMinutes()
+    return(stats?.vandaagAfspraken??[]).filter((b:Afspraak)=>{const[h,m]=b.tijd.split(':').map(Number);return h*60+m>nowMins}).sort((a:Afspraak,b:Afspraak)=>a.tijd.localeCompare(b.tijd))[0]??null
+  })()
+  const minsUntilNext=nextAppt?(()=>{const[h,m]=nextAppt.tijd.split(':').map(Number);const now=new Date();return h*60+m-(now.getHours()*60+now.getMinutes())})():null
+
+  return(
+    <div className="animate-fade-up">
+      <div className="mb-8 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Dashboard</h1>
+          <p className="text-gray-500 text-sm mt-0.5 capitalize">{formatLongDate(today)}</p>
+        </div>
+        {lastUpdated&&<p className="text-[11px] text-gray-700 shrink-0 pb-0.5">Bijgewerkt om {lastUpdated}</p>}
+      </div>
+      {stats&&(
+        <div className={`mb-6 rounded-2xl border p-4 flex items-center gap-4 ${nextAppt?'bg-[#2176d4]/8 border-[#2176d4]/20':'bg-[#141414] border-[#222]'}`}>
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${nextAppt?'bg-[#2176d4]/15':'bg-[#1e1e1e]'}`}>
+            <svg className={`w-5 h-5 ${nextAppt?'text-[#2176d4]':'text-gray-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          {nextAppt?(
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-[#2176d4]/70 uppercase tracking-wider">Volgende afspraak</p>
+              <p className="text-white font-bold truncate">{nextAppt.naam} <span className="text-gray-400 font-normal">– {nextAppt.service}</span></p>
+            </div>
+          ):(
+            <div className="flex-1">
+              <p className="text-xs font-bold text-gray-600 uppercase tracking-wider">Volgende afspraak</p>
+              <p className="text-gray-500 font-medium text-sm">Geen afspraken meer vandaag</p>
+            </div>
+          )}
+          {nextAppt&&minsUntilNext!==null&&(
+            <div className="text-right shrink-0">
+              <p className="text-2xl font-black text-[#2176d4]">{nextAppt.tijd}</p>
+              <p className="text-xs text-gray-500">over {minsUntilNext<60?`${minsUntilNext} min`:`${Math.floor(minsUntilNext/60)}u ${minsUntilNext%60}m`}</p>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        {[
+          {label:'Vandaag',value:stats?.vandaag??'—',sub:'afspraken',gold:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>},
+          {label:'Deze week',value:stats?.week??'—',sub:'afspraken',gold:false,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>},
+          {label:'Wachtlijst',value:waitlistCount??'—',sub:'openstaand',gold:false,amber:(waitlistCount??0)>0,onClick:()=>onNavigate('management'),icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25H12M3 3.375C3 2.339 3.84 1.5 4.875 1.5H7.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125H4.875A1.875 1.875 0 013 6.375V3.375z"/></svg>},
+        ].map((c,i)=>(
+          <div key={c.label} style={{animationDelay:`${i*60}ms`}} onClick={(c as {onClick?:()=>void}).onClick}
+            className={`animate-fade-up rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${(c as {onClick?:()=>void}).onClick?'cursor-pointer':''} ${c.gold?'bg-gradient-to-br from-[#2176d4]/15 to-[#2176d4]/5 border-[#2176d4]/25 hover:shadow-[#2176d4]/10':(c as {amber?:boolean}).amber?'bg-amber-900/15 border-amber-800/30 hover:shadow-amber-900/20':'bg-[#141414] border-[#222] hover:border-[#2a2a2a] hover:shadow-black/40'}`}>
+            <div className="flex items-start justify-between mb-3">
+              <p className={`text-[11px] font-bold uppercase tracking-widest ${c.gold?'text-[#2176d4]/60':(c as {amber?:boolean}).amber?'text-amber-500/70':'text-gray-600'}`}>{c.label}</p>
+              <span className={c.gold?'text-[#2176d4]/40':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-700'}>{c.icon}</span>
+            </div>
+            <p className={`text-4xl font-black leading-none ${c.gold?'text-[#2176d4]':(c as {amber?:boolean}).amber?'text-amber-400':'text-white'}`}><AnimatedNumber value={c.value as number|string}/></p>
+            <p className={`text-xs mt-2 ${c.gold?'text-[#2176d4]/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-600'}`}>{c.sub}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid lg:grid-cols-2 gap-6">
+        <div className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
+          <div className="px-5 py-4 border-b border-[#1a1a1a] flex items-center justify-between">
+            <div><h2 className="font-bold text-white text-sm">Aankomende afspraken</h2><p className="text-xs text-gray-600 mt-0.5">{upcoming.length} gepland</p></div>
+            <span className="w-8 h-8 rounded-xl bg-[#2176d4]/10 flex items-center justify-center text-[#2176d4]"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5"/></svg></span>
+          </div>
+          {upcoming.length===0?<div className="py-10 text-center"><p className="text-gray-600 text-sm">Geen aankomende afspraken</p></div>:(
+            <div className="divide-y divide-[#1a1a1a]">
+              {upcoming.map(b=>(
+                <div key={b.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/2 transition-colors">
+                  <div className="shrink-0 w-10 h-10 rounded-xl bg-[#2176d4]/10 flex flex-col items-center justify-center">
+                    <p className="text-[9px] font-bold text-[#2176d4]/70 uppercase leading-none">{formatShortDate(b.datum).split(' ')[0]}</p>
+                    <p className="text-sm font-black text-[#2176d4] leading-none mt-0.5">{b.tijd}</p>
+                  </div>
+                  <div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-500 truncate">{b.service}</p></div>
+                  <p className="text-xs text-gray-600 shrink-0">{formatShortDate(b.datum)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
+          <div className="px-5 py-4 border-b border-[#1a1a1a] flex items-center justify-between">
+            <div><h2 className="font-bold text-white text-sm">Schema vandaag</h2><p className="text-xs text-gray-600 mt-0.5 capitalize">{formatLongDate(today)}</p></div>
+            <span className="w-8 h-8 rounded-xl bg-[#1e1e1e] flex items-center justify-center text-gray-500"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span>
+          </div>
+          <div className="overflow-y-auto max-h-72">
+            {workSlots.length===0&&<p className="text-center text-gray-600 text-sm py-10">Geen werkrooster vandaag</p>}
+            {workSlots.map(slot=>{
+              const b=stats?.vandaagAfspraken?.find(b=>b.tijd===slot)
+              const isPause=isBreak(slot,dayBreaks)
+              return(
+                <div key={slot} className={`flex items-center gap-3 px-4 py-2.5 border-b border-[#1a1a1a] transition-colors ${b?'bg-[#2176d4]/4 hover:bg-[#2176d4]/6':isPause?'bg-amber-900/8':'hover:bg-white/2'}`}>
+                  <span className={`font-black text-[11px] w-12 text-center shrink-0 px-1.5 py-1 rounded-lg ${b?'bg-[#2176d4] text-white':isPause?'bg-amber-900/30 text-amber-500':'bg-[#1e1e1e] text-gray-500'}`}>{slot}</span>
+                  {isPause?<span className="text-amber-500/70 text-xs">Pauze</span>:b?(<><div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-500 truncate">{b.service}</p></div><span className="ml-auto bg-[#2176d4] text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0">€{b.prijs}</span></>):<span className="text-gray-700 text-xs">Vrij</span>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface AfspraakFormulierType{id?:string;naam:string;telefoon:string;email:string;service:string;dienstId:string;prijs:number;duur:number;datum:string;tijd:string;notities:string}
+const LEEG_FORMULIER:AfspraakFormulierType={naam:'',telefoon:'',email:'',service:'',dienstId:'',prijs:0,duur:30,datum:'',tijd:'',notities:''}
+
+/* ─── Calendar ───────────────────────────────────────────── */
+function CalendarView() {
+  const today=new Date()
+  const[viewMonth,setViewMonth]=useState(new Date(today.getFullYear(),today.getMonth(),1))
+  const[selectedDay,setSelectedDay]=useState(toDateStr(today))
+  const[monthBookings,setMonthBookings]=useState<Afspraak[]>([])
+  const[schedule,setSchedule]=useState<Record<string,DayConfig>>(DEFAULT_SCHEDULE)
+  const[blockedDates,setBlockedDates]=useState<string[]>([])
+  const dayBookings=useMemo(()=>monthBookings.filter(b=>b.datum===selectedDay),[selectedDay,monthBookings])
+  const monthStr=`${viewMonth.getFullYear()}-${String(viewMonth.getMonth()+1).padStart(2,'0')}`
+
+  useEffect(()=>{
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const s=d.instellingen??{}
+      if(s.day_schedule){
+        const parsed:Record<string,DayConfig>=JSON.parse(s.day_schedule)
+        for(const k of Object.keys(parsed))parsed[k]={...parsed[k],breaks:parsed[k].breaks??[]}
+        setSchedule(parsed)
+      }
+      if(s.geblokkeerde_datums)setBlockedDates(JSON.parse(s.geblokkeerde_datums))
+    })
+  },[])
+
+  useEffect(()=>{
+    const load=()=>fetch(`/api/afspraken?month=${monthStr}`).then(r=>r.json()).then(d=>setMonthBookings(d.afspraken??[]))
+    load(); const id=setInterval(load,60_000); return()=>clearInterval(id)
+  },[monthStr])
+
+  const firstDay=new Date(viewMonth.getFullYear(),viewMonth.getMonth(),1)
+  const lastDay=new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,0)
+  const startOffset=(firstDay.getDay()+6)%7
+  const cells:(Date|null)[]=Array(startOffset).fill(null)
+  for(let i=1;i<=lastDay.getDate();i++)cells.push(new Date(viewMonth.getFullYear(),viewMonth.getMonth(),i))
+  const byDate:Record<string,number>={}
+  for(const b of monthBookings)byDate[b.datum]=(byDate[b.datum]??0)+1
+
+  const selectedDow=String(new Date(selectedDay+'T12:00:00').getDay())
+  const dayCfg=schedule[selectedDow]
+  const slots=dayCfg?.open?generateWorkSlots(dayCfg.start,dayCfg.end):[]
+
+  return(
+    <div>
+      <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white mb-1">Agenda</h1>
+      <p className="text-gray-500 text-sm mb-6">Klik op een dag om het rooster te zien</p>
+      <div className="grid lg:grid-cols-2 gap-6">
+        <div className="bg-[#141414] rounded-2xl border border-[#222] p-5 transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
+          <div className="flex items-center justify-between mb-4">
+            <button onClick={()=>setViewMonth(new Date(viewMonth.getFullYear(),viewMonth.getMonth()-1,1))} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#2176d4]/10 text-[#2176d4] font-bold text-xl transition-colors">‹</button>
+            <span className="font-black text-white capitalize">{viewMonth.toLocaleDateString('nl-NL',{month:'long',year:'numeric'})}</span>
+            <button onClick={()=>setViewMonth(new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,1))} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#2176d4]/10 text-[#2176d4] font-bold text-xl transition-colors">›</button>
+          </div>
+          <div className="grid grid-cols-7 mb-1">{NL_DAYS_SHORT.map(d=><div key={d} className="text-center text-xs font-bold text-gray-500 py-1">{d}</div>)}</div>
+          <div className="grid grid-cols-7">
+            {cells.map((day,i)=>{
+              if(!day)return<div key={i}/>
+              const ds=toDateStr(day); const count=byDate[ds]??0
+              const isSelected=ds===selectedDay; const isToday=ds===toDateStr(today)
+              const isBlocked=blockedDates.includes(ds); const isClosed=schedule[String(day.getDay())]?.open===false
+              return(
+                <button key={i} onClick={()=>setSelectedDay(ds)} className={['flex flex-col items-center py-1.5 rounded-xl m-0.5 transition-colors font-bold text-sm relative',isSelected?'bg-[#2176d4] text-white shadow-md':isBlocked?'bg-red-900/30 text-red-400 hover:bg-red-900/50':isClosed?'bg-[#1a1a1a] text-gray-600 hover:bg-[#222]':isToday?'ring-2 ring-[#2176d4] text-[#2176d4]':'hover:bg-[#2176d4]/10 text-gray-300'].join(' ')}>
+                  <span>{day.getDate()}</span>
+                  {!isBlocked&&count>0&&<div className="flex gap-0.5 mt-0.5">{Array.from({length:Math.min(count,3)}).map((_,j)=><div key={j} className={`w-1.5 h-1.5 rounded-full ${isSelected?'bg-black':'bg-[#2176d4]'}`}/>)}</div>}
+                </button>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-[#1e1e1e] text-xs font-semibold text-gray-500">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#2176d4] inline-block"/>Geselecteerd</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-900/40 inline-block"/>Geblokkeerd</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#1a1a1a] inline-block"/>Gesloten</span>
+          </div>
+        </div>
+        <div className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
+          <div className={`px-5 py-4 border-b border-[#1e1e1e] ${blockedDates.includes(selectedDay)?'bg-red-900/10':''}`}>
+            <h2 className="font-semibold text-white capitalize text-sm">{formatLongDate(selectedDay)}</h2>
+            {blockedDates.includes(selectedDay)?<p className="text-xs text-red-400 font-medium mt-0.5">Geblokkeerd — geen boekingen mogelijk</p>:!dayCfg?.open?<p className="text-xs text-gray-500 font-bold">Gesloten</p>:<p className="text-xs text-gray-500">{dayBookings.length} afspraken · {dayCfg.start}–{dayCfg.end}</p>}
+          </div>
+          <div className="overflow-y-auto max-h-96">
+            {slots.length===0&&<p className="text-center text-gray-600 text-sm font-medium py-10">Geen rooster beschikbaar</p>}
+            {slots.map(slot=>{
+              const b=dayBookings.find(b=>b.tijd===slot); const isPause=isBreak(slot,dayCfg?.breaks??[])
+              return(
+                <div key={slot} className={`flex items-center gap-3 px-3 py-2.5 border-b border-[#1e1e1e] ${b?'bg-[#2176d4]/5':isPause?'bg-amber-900/10':'bg-[#161616]'}`}>
+                  <span className={`font-black text-xs w-14 text-center shrink-0 px-2 py-1 rounded-lg ${b?'bg-[#2176d4] text-white':isPause?'bg-amber-900/30 text-amber-400':'bg-[#1e1e1e] text-[#2176d4] border border-[#2176d4]/20'}`}>{slot}</span>
+                  {isPause?<span className="text-amber-400 text-xs font-medium">Pauze</span>:b?<div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-400">{b.service} · €{b.prijs}</p></div>:<span className="text-gray-600 text-xs font-medium">Vrij</span>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── DatePicker ─────────────────────────────────────────── */
+function DatePicker({value,onChange}:{value:string;onChange:(d:string)=>void}) {
+  const[open,setOpen]=useState(false)
+  const[viewDate,setViewDate]=useState(()=>{const base=value?new Date(value+'T12:00:00'):new Date();return new Date(base.getFullYear(),base.getMonth(),1)})
+  const ref=useRef<HTMLDivElement>(null)
+  useEffect(()=>{function h(e:MouseEvent){if(ref.current&&!ref.current.contains(e.target as Node))setOpen(false)}; document.addEventListener('mousedown',h); return()=>document.removeEventListener('mousedown',h)},[])
+  useEffect(()=>{if(value){const d=new Date(value+'T12:00:00');setViewDate(new Date(d.getFullYear(),d.getMonth(),1))}},[value])
+  const year=viewDate.getFullYear(),month=viewDate.getMonth()
+  const todayStr=new Date().toISOString().split('T')[0]
+  const startOffset=(new Date(year,month,1).getDay()+6)%7
+  const daysInMonth=new Date(year,month+1,0).getDate()
+  const cells:(number|null)[]=[...Array(startOffset).fill(null),...Array.from({length:daysInMonth},(_,i)=>i+1)]
+  while(cells.length%7!==0)cells.push(null)
+  function selectDay(day:number){const str=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;onChange(str);setOpen(false)}
+  return(
+    <div ref={ref} className="relative">
+      <button type="button" onClick={()=>setOpen(o=>!o)} className={`w-full bg-[#0e0e0e] border rounded-xl px-3 py-2.5 text-sm text-left flex items-center justify-between transition-colors ${open?'border-[#2176d4]':'border-[#2a2a2a] hover:border-[#333]'}`}>
+        <span className={value?'text-white':'text-gray-700'}>{value?formatLongDate(value):'Kies een datum'}</span>
+        <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+      </button>
+      {open&&(
+        <div className="absolute top-full left-0 mt-2 z-50 w-full bg-[#141414] border border-[#2a2a2a] rounded-2xl shadow-2xl p-4 animate-fade-up">
+          <div className="flex items-center justify-between mb-4">
+            <button type="button" onClick={()=>setViewDate(new Date(year,month-1,1))} className="w-8 h-8 rounded-lg bg-[#1e1e1e] hover:bg-[#2a2a2a] flex items-center justify-center text-gray-400 hover:text-white transition-colors"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg></button>
+            <span className="text-white font-bold text-sm capitalize">{NL_MONTHS_LONG[month]} {year}</span>
+            <button type="button" onClick={()=>setViewDate(new Date(year,month+1,1))} className="w-8 h-8 rounded-lg bg-[#1e1e1e] hover:bg-[#2a2a2a] flex items-center justify-center text-gray-400 hover:text-white transition-colors"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <div className="grid grid-cols-7 mb-1">{['Ma','Di','Wo','Do','Vr','Za','Zo'].map(d=><div key={d} className="text-center text-xs font-bold text-gray-600 py-1">{d}</div>)}</div>
+          <div className="grid grid-cols-7 gap-0.5">
+            {cells.map((day,i)=>{
+              if(!day)return<div key={i}/>
+              const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+              const isSelected=ds===value,isToday=ds===todayStr,isPast=ds<todayStr
+              return<button key={i} type="button" onClick={()=>!isPast&&selectDay(day)} disabled={isPast} className={`aspect-square rounded-lg text-sm font-medium transition-all flex items-center justify-center ${isPast?'text-gray-700 cursor-not-allowed':''} ${isSelected&&!isPast?'bg-[#2176d4] text-white shadow-[0_0_12px_rgba(33,118,212,0.35)]':''} ${isToday&&!isSelected?'bg-[#2176d4]/15 text-[#2176d4] font-bold ring-1 ring-[#2176d4]/30':''} ${!isSelected&&!isToday&&!isPast?'text-gray-400 hover:bg-[#1e1e1e] hover:text-white':''}`}>{day}</button>
+            })}
+          </div>
+          <div className="mt-3 pt-3 border-t border-[#1e1e1e] flex justify-end"><button type="button" onClick={()=>{onChange(todayStr);setOpen(false)}} className="text-xs font-bold text-[#2176d4] hover:text-[#3080e0] transition-colors">Vandaag</button></div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── AfspraakFormModal ──────────────────────────────────── */
+function AfspraakFormModal({initial,slug,onClose,onSaved}:{initial:AfspraakFormulierType;slug:string;onClose:()=>void;onSaved:()=>void}) {
+  const[form,setForm]=useState<AfspraakFormulierType>(initial)
+  const[diensten,setDiensten]=useState<{id:string;naam:string;prijs:number;duur:number}[]>([])
+  const[slots,setSlots]=useState<{time:string;available:boolean}[]>([])
+  const[loadingSlots,setLoadingSlots]=useState(false)
+  const[saving,setSaving]=useState(false)
+  const[error,setError]=useState('')
+  const isEdit=!!initial.id
+
+  useEffect(()=>{
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const s=d.instellingen??{}
+      if(s.diensten){
+        const list=JSON.parse(s.diensten)
+        setDiensten(list)
+        if(isEdit&&!form.dienstId&&form.service){
+          const svc=list.find((x:{naam:string;id:string})=>x.naam===form.service)
+          if(svc)setForm(f=>({...f,dienstId:svc.id}))
+        }
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[])
+
+  useEffect(()=>{
+    if(!form.datum||!form.dienstId){setSlots([]);return}
+    setLoadingSlots(true)
+    fetch(`/api/slots/${slug}?datum=${form.datum}&dienst=${form.dienstId}`)
+      .then(r=>r.json()).then(d=>{
+        const fetched:{time:string;available:boolean}[]=d.slots??[]
+        if(isEdit&&initial.tijd&&!fetched.find(s=>s.time===initial.tijd))fetched.unshift({time:initial.tijd,available:true})
+        setSlots(fetched)
+        if(!isEdit&&form.tijd&&!fetched.find(s=>s.time===form.tijd&&s.available))setForm(f=>({...f,tijd:''}))
+      }).finally(()=>setLoadingSlots(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[form.datum,form.dienstId])
+
+  function pickDienst(naam:string){
+    const s=diensten.find(s=>s.naam===naam)
+    setForm(f=>({...f,service:naam,dienstId:s?.id??'',prijs:s?.prijs??f.prijs,duur:s?.duur??f.duur,tijd:''}))
+  }
+
+  async function submit(e:React.FormEvent){
+    e.preventDefault();setError('');setSaving(true)
+    try{
+      const{dienstId:_,...rest}=form
+      const method=isEdit?'PATCH':'POST'
+      const r=await fetch('/api/afspraken',{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(isEdit?{id:initial.id,...rest}:rest)})
+      const d=await r.json()
+      if(!r.ok){setError(d.error??'Fout');return}
+      onSaved()
+    }catch{setError('Netwerkfout')}finally{setSaving(false)}
+  }
+
+  const availableSlots=slots.filter(s=>s.available)
+
+  return(
+    <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={onClose}>
+      <div className="bg-[#141414] rounded-t-2xl sm:rounded-2xl border-t sm:border border-[#2a2a2a] w-full sm:max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-[#1e1e1e] flex items-center justify-between sticky top-0 bg-[#141414] z-10">
+          <h2 className="font-bold text-white text-lg">{isEdit?'Afspraak bewerken':'Afspraak toevoegen'}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1e1e1e] text-gray-400 hover:text-white hover:bg-[#2a2a2a] transition-all flex items-center justify-center text-lg leading-none">×</button>
+        </div>
+        <form onSubmit={submit} className="p-6 space-y-5">
+          {error&&<div className="bg-red-900/30 border border-red-700/40 text-red-400 text-sm px-4 py-3 rounded-xl">{error}</div>}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Naam *</label><input required value={form.naam} onChange={e=>setForm(f=>({...f,naam:e.target.value}))} placeholder="Ahmed El Mansouri" className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+            <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Telefoon</label><input value={form.telefoon} onChange={e=>setForm(f=>({...f,telefoon:e.target.value}))} placeholder="06 12345678" className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+          </div>
+          <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">E-mail <span className="text-gray-700 normal-case font-normal">(optioneel — klant ontvangt bevestiging)</span></label><input type="email" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="klant@email.com" className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Dienst *</label>
+            {diensten.length>0?(
+              <div className="grid grid-cols-1 gap-2">
+                {diensten.map(s=>(
+                  <button key={s.id} type="button" onClick={()=>pickDienst(s.naam)} className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-all ${form.service===s.naam?'border-[#2176d4] bg-[#2176d4]/10 text-white':'border-[#2a2a2a] bg-[#0e0e0e] text-gray-400 hover:border-[#333] hover:text-white'}`}>
+                    <span>{s.naam}</span>
+                    <span className={`font-black ${form.service===s.naam?'text-[#2176d4]':'text-gray-600'}`}>€{s.prijs} · {s.duur}min</span>
+                  </button>
+                ))}
+              </div>
+            ):(
+              <input required value={form.service} onChange={e=>setForm(f=>({...f,service:e.target.value}))} className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+            )}
+          </div>
+          <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Datum *</label><DatePicker value={form.datum} onChange={d=>setForm(f=>({...f,datum:d,tijd:''}))} /></div>
+          {form.datum&&(
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Tijd *</label>
+              {loadingSlots?<div className="flex items-center gap-2 py-3 text-gray-500 text-sm"><div className="w-4 h-4 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>Tijdsloten laden...</div>:!form.dienstId?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Kies eerst een dienst</div>:availableSlots.length===0?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Geen beschikbare tijdsloten op deze dag</div>:(
+                <div className="grid grid-cols-4 gap-2">
+                  {availableSlots.map(s=><button key={s.time} type="button" onClick={()=>setForm(f=>({...f,tijd:s.time}))} className={`py-2.5 rounded-xl text-sm font-bold transition-all ${form.tijd===s.time?'bg-[#2176d4] text-white shadow-[0_0_15px_rgba(33,118,212,0.3)]':'bg-[#0e0e0e] border border-[#2a2a2a] text-gray-400 hover:border-[#2176d4]/50 hover:text-white'}`}>{s.time}</button>)}
+                </div>
+              )}
+            </div>
+          )}
+          <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Notities <span className="text-gray-700 normal-case font-normal">(intern)</span></label><textarea value={form.notities} onChange={e=>setForm(f=>({...f,notities:e.target.value}))} rows={2} placeholder="bijv. altijd kort aan zijkanten" className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors resize-none"/></div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] text-gray-400 text-sm font-medium hover:border-[#333] hover:text-white transition-all">Annuleren</button>
+            <button type="submit" disabled={saving||!form.datum||!form.tijd} className="flex-1 py-2.5 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-40 transition-all duration-200">{saving?'Opslaan...':isEdit?'Bijwerken':'Toevoegen'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Appointments ───────────────────────────────────────── */
+function AppointmentsView({session}:{session:Session}) {
+  const[filter,setFilter]=useState<'upcoming'|'today'|'all'|'past'>('upcoming')
+  const[search,setSearch]=useState('')
+  const[bookings,setBookings]=useState<Afspraak[]>([])
+  const[loading,setLoading]=useState(false)
+  const[deleting,setDeleting]=useState<string|null>(null)
+  const[noShowLoading,setNoShowLoading]=useState<string|null>(null)
+  const[formBooking,setFormBooking]=useState<AfspraakFormulierType|null>(null)
+  const[confirmDel,setConfirmDel]=useState<string|null>(null)
+
+  const load=useCallback(async()=>{
+    setLoading(true)
+    try{const r=await fetch(`/api/afspraken?filter=${filter}&search=${encodeURIComponent(search)}`);const d=await r.json();setBookings(d.afspraken??[])}finally{setLoading(false)}
+  },[filter,search])
+
+  useEffect(()=>{load();const id=setInterval(load,60_000);return()=>clearInterval(id)},[load])
+
+  async function del(id:string){
+    setDeleting(id)
+    await fetch('/api/afspraken',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
+    setDeleting(null);setConfirmDel(null);load()
+  }
+  async function toggleNoShow(id:string,current:boolean){
+    setNoShowLoading(id)
+    await fetch('/api/afspraken',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,no_show:!current})})
+    setNoShowLoading(null);load()
+  }
+
+  const statusBadge={
+    today:<span className="text-xs font-black px-2 py-0.5 rounded-full bg-amber-900/30 text-amber-400">VANDAAG</span>,
+    upcoming:<span className="text-xs font-black px-2 py-0.5 rounded-full bg-[#2176d4]/10 text-[#2176d4]">AANKOMEND</span>,
+    past:<span className="text-xs font-black px-2 py-0.5 rounded-full bg-[#1e1e1e] text-gray-500">VERLEDEN</span>,
+  }
+  const noShowBadge=<span className="text-xs font-black px-2 py-0.5 rounded-full bg-orange-900/30 text-orange-400">NO-SHOW</span>
+  const filters=[{id:'upcoming',label:'Aankomend'},{id:'today',label:'Vandaag'},{id:'all',label:'Alle'},{id:'past',label:'Verleden'}] as const
+
+  return(
+    <div>
+      {formBooking&&<AfspraakFormModal initial={formBooking} slug={session.slug} onClose={()=>setFormBooking(null)} onSaved={()=>{setFormBooking(null);load()}}/>}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Afspraken</h1>
+        <div className="flex gap-2">
+          <CalendarSubscribeButton/>
+          <button onClick={()=>setFormBooking({...LEEG_FORMULIER})} className="px-4 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] transition-all duration-200">+ Toevoegen</button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 mb-6">
+        <input type="text" placeholder="Zoeken op naam, e-mail of code..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#2176d4] transition-colors"/>
+        <div className="flex gap-1 bg-[#1a1a1a] rounded-xl p-1 border border-[#2a2a2a] overflow-x-auto">
+          {filters.map(f=><button key={f.id} onClick={()=>setFilter(f.id)} className={['flex-1 min-w-fit px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',filter===f.id?'bg-[#2176d4] text-white shadow-sm':'text-gray-500 hover:text-gray-300'].join(' ')}>{f.label}</button>)}
+        </div>
+      </div>
+      {loading?<div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>:bookings.length===0?<div className="text-center py-12 text-gray-500 font-medium">Geen afspraken gevonden</div>:(
+        <div className="space-y-3">
+          {bookings.map(b=>{
+            const status=getStatus(b.datum)
+            return(
+              <div key={b.id} className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-200 hover:border-[#2a2a2a] hover:-translate-y-px hover:shadow-md hover:shadow-black/30">
+                <div className="p-4 flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-xs font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">{serviceInitial(b.service)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-black text-white truncate">{b.naam}</p>
+                        <p className="text-sm text-gray-400 truncate">{b.service} · {formatMedDate(b.datum)} · {b.tijd}</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                          <a href={`tel:${b.telefoon}`} className="text-xs text-[#2176d4] hover:underline">{b.telefoon}</a>
+                          <a href={`mailto:${b.email}`} className="text-xs text-[#2176d4] hover:underline truncate">{b.email}</a>
+                        </div>
+                        {b.notities&&<p className="text-xs text-gray-500 italic mt-1 truncate">📝 {b.notities}</p>}
+                        <div className="mt-1 flex flex-wrap gap-1">{b.no_show?noShowBadge:statusBadge[status]}</div>
+                      </div>
+                      <div className="text-right shrink-0"><p className="font-black text-white">€{b.prijs}</p><p className="text-xs text-gray-500 font-mono">{b.code}</p></div>
+                    </div>
+                  </div>
+                </div>
+                {confirmDel===b.id?(
+                  <div className="border-t border-[#1e1e1e] px-4 py-3 flex gap-2">
+                    <button onClick={()=>del(b.id)} disabled={deleting===b.id} className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm disabled:opacity-50 active:scale-95 transition-transform">{deleting===b.id?'…':'Ja, verwijder'}</button>
+                    <button onClick={()=>setConfirmDel(null)} className="flex-1 py-2.5 rounded-xl border border-[#333] text-gray-400 font-bold text-sm active:scale-95 transition-transform">Annuleren</button>
+                  </div>
+                ):(
+                  <div className="border-t border-[#1e1e1e] grid grid-cols-3 divide-x divide-[#1e1e1e]">
+                    <button onClick={()=>setFormBooking({id:b.id,naam:b.naam,telefoon:b.telefoon,email:b.email,service:b.service,dienstId:'',prijs:b.prijs,duur:b.duur,datum:b.datum,tijd:b.tijd,notities:b.notities??''})} className="py-3 text-sm font-bold text-[#2176d4] hover:bg-[#2176d4]/5 active:bg-[#2176d4]/10 transition-colors">Bewerken</button>
+                    <button onClick={()=>toggleNoShow(b.id,!!b.no_show)} disabled={noShowLoading===b.id} className={`py-3 text-sm font-bold transition-colors disabled:opacity-50 hover:bg-white/5 active:bg-white/10 ${b.no_show?'text-gray-500':'text-orange-400'}`}>{noShowLoading===b.id?'…':b.no_show?'Herstel':'No-show'}</button>
+                    <button onClick={()=>setConfirmDel(b.id)} className="py-3 text-sm font-bold text-red-400 hover:bg-red-500/5 active:bg-red-500/10 transition-colors">Verwijder</button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Customers ──────────────────────────────────────────── */
+function CustomersView() {
+  const[klanten,setKlanten]=useState<Klant[]>([])
+  const[loading,setLoading]=useState(true)
+  const[search,setSearch]=useState('')
+  const[expanded,setExpanded]=useState<string|null>(null)
+  useEffect(()=>{fetch('/api/klanten').then(r=>r.json()).then(d=>{setKlanten(d.klanten??[]);setLoading(false)})},[])
+  const filtered=klanten.filter(c=>c.email.includes(search.toLowerCase())||c.naam.toLowerCase().includes(search.toLowerCase()))
+  return(
+    <div className="animate-fade-up">
+      <div className="flex items-center justify-between mb-6">
+        <div><h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Klanten</h1><p className="text-gray-500 text-sm mt-0.5">{klanten.length} unieke klanten</p></div>
+      </div>
+      <div className="mb-5"><input type="text" placeholder="Zoeken op naam of e-mail..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-[#1a1a1a] border border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+      {loading?<div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>:filtered.length===0?<p className="text-center text-gray-500 py-12">Geen klanten gevonden</p>:(
+        <div className="space-y-2">
+          {filtered.map(c=>(
+            <div key={c.email} className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-200 hover:border-[#2a2a2a]">
+              <button onClick={()=>setExpanded(expanded===c.email?null:c.email)} className="w-full flex items-center gap-4 px-5 py-4 text-left">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-sm font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">{c.naam.charAt(0).toUpperCase()}</div>
+                <div className="flex-1 min-w-0"><p className="font-bold text-white truncate">{c.naam}</p><p className="text-xs text-gray-500 truncate">{c.email}</p></div>
+                <div className="flex items-center gap-4 shrink-0 text-right">
+                  <div className="hidden sm:block"><p className="text-xs text-gray-600">bezoeken</p><p className="font-black text-white">{c.bezoeken}</p></div>
+                  <div><p className="text-xs text-gray-600">laatste bezoek</p><p className="font-bold text-white text-sm">{formatShortDate(c.lastDate)}</p></div>
+                  <svg className={`w-4 h-4 text-gray-600 transition-transform duration-200 ${expanded===c.email?'rotate-180':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </button>
+              {expanded===c.email&&(
+                <div className="border-t border-[#1e1e1e] divide-y divide-[#1a1a1a]">
+                  <div className="px-5 py-3 flex gap-6 sm:hidden"><div><p className="text-xs text-gray-600">bezoeken</p><p className="font-black text-white">{c.bezoeken}</p></div></div>
+                  {c.afspraken.map((b,i)=>(
+                    <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-white/2 transition-colors">
+                      <div className="w-8 h-8 rounded-lg bg-[#1e1e1e] flex items-center justify-center text-[10px] font-black text-gray-500 shrink-0">{serviceInitial(b.service)}</div>
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-white truncate">{b.service}</p><p className="text-xs text-gray-500">{formatMedDate(b.datum)} · {b.tijd}</p></div>
+                      <div className="text-right shrink-0"><p className="text-[10px] text-gray-600 font-mono">{b.code}</p></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Services ───────────────────────────────────────────── */
+interface DienstItem{id:string;naam:string;prijs:number;duur:number;beschrijving:string}
+const DEFAULT_DIENSTEN:DienstItem[]=[
+  {id:'knipbeurt',naam:'Knipbeurt',prijs:20,duur:30,beschrijving:'30 minuten'},
+  {id:'knipbeurt-baard',naam:'Knipbeurt met baard',prijs:25,duur:45,beschrijving:'45 minuten'},
+  {id:'baard-trimmen',naam:'Baard trimmen',prijs:10,duur:15,beschrijving:'15 minuten'},
+  {id:'contouren',naam:'Contouren',prijs:5,duur:15,beschrijving:'15 minuten'},
+]
+
+function ServicesView() {
+  const[diensten,setDiensten]=useState<DienstItem[]>([])
+  const[form,setForm]=useState<DienstItem|null>(null)
+  const[saving,setSaving]=useState(false)
+  const[msg,setMsg]=useState('')
+  const[confirmRemove,setConfirmRemove]=useState<string|null>(null)
+  const durations=[15,20,30,45,60,75,90]
+
+  useEffect(()=>{
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const s=d.instellingen??{}
+      setDiensten(s.diensten?JSON.parse(s.diensten):DEFAULT_DIENSTEN)
+    })
+  },[])
+
+  async function persist(updated:DienstItem[]){
+    setSaving(true)
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'diensten',value:JSON.stringify(updated)})})
+    setSaving(false);setMsg('Opgeslagen');setTimeout(()=>setMsg(''),3000)
+  }
+  function saveForm(){
+    if(!form||!form.naam)return
+    const updated=diensten.find(s=>s.id===form.id)?diensten.map(s=>s.id===form.id?form:s):[...diensten,form]
+    setDiensten(updated);persist(updated);setForm(null)
+  }
+  function remove(id:string){const updated=diensten.filter(s=>s.id!==id);setDiensten(updated);persist(updated);setConfirmRemove(null)}
+
+  return(
+    <div className="max-w-2xl">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Diensten</h1>
+        <button onClick={()=>setForm({id:Date.now().toString(),naam:'',prijs:0,duur:30,beschrijving:''})} className="px-4 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.35)] transition-all duration-200">+ Toevoegen</button>
+      </div>
+      {msg&&<div className="mb-4 bg-[#2176d4]/10 border border-[#2176d4]/20 text-[#2176d4] text-sm font-bold px-4 py-3 rounded-xl">{msg}</div>}
+      {form&&(
+        <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5 mb-6">
+          <h2 className="font-semibold text-white mb-4">{diensten.find(s=>s.id===form.id)?'Dienst bewerken':'Nieuwe dienst'}</h2>
+          <div className="space-y-3">
+            <div><label className="block text-xs font-bold text-gray-400 mb-1">Naam</label><input value={form.naam} onChange={e=>setForm({...form,naam:e.target.value})} placeholder="bijv. Normale Knipbeurt" className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-bold text-gray-400 mb-1">Prijs (€)</label><input type="number" min="0" value={form.prijs} onChange={e=>setForm({...form,prijs:Number(e.target.value)})} className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+              <div><label className="block text-xs font-bold text-gray-400 mb-1">Duur</label><select value={form.duur} onChange={e=>setForm({...form,duur:Number(e.target.value)})} className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-[#2176d4] transition-colors">{durations.map(d=><option key={d} value={d}>{d} min</option>)}</select></div>
+            </div>
+            <div><label className="block text-xs font-bold text-gray-400 mb-1">Omschrijving</label><input value={form.beschrijving} onChange={e=>setForm({...form,beschrijving:e.target.value})} placeholder="bijv. 30 minuten" className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/></div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button onClick={()=>setForm(null)} className="px-4 py-2 border-2 border-[#333] rounded-xl font-bold text-gray-400 text-sm hover:border-[#444] transition-colors">Annuleren</button>
+            <button onClick={saveForm} disabled={!form.naam||saving} className="px-6 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">{saving?'Opslaan...':'Opslaan'}</button>
+          </div>
+        </div>
+      )}
+      <div className="space-y-3">
+        {diensten.map(s=>(
+          <div key={s.id} className="bg-[#141414] rounded-2xl border border-[#222] p-4 flex items-center gap-4 transition-all duration-200 hover:border-[#2a2a2a] hover:-translate-y-px hover:shadow-md hover:shadow-black/30">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-xs font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">{serviceInitial(s.naam)}</div>
+            <div className="flex-1 min-w-0"><p className="font-black text-white">{s.naam}</p><p className="text-sm text-gray-400">{s.beschrijving} · {s.duur} min</p></div>
+            <div className="text-right shrink-0">
+              <p className="font-black text-[#2176d4] text-lg">€{s.prijs}</p>
+              <div className="flex gap-3 mt-1 justify-end">
+                <button onClick={()=>setForm({...s})} className="text-xs text-[#2176d4] hover:underline">Bewerken</button>
+                {confirmRemove===s.id?<span className="flex gap-1"><button onClick={()=>remove(s.id)} className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-lg font-bold">Ja</button><button onClick={()=>setConfirmRemove(null)} className="text-xs border border-[#333] text-gray-400 px-2 py-0.5 rounded-lg font-bold">Nee</button></span>:<button onClick={()=>setConfirmRemove(s.id)} className="text-xs text-red-400 hover:text-red-500">Verwijder</button>}
+              </div>
+            </div>
+          </div>
+        ))}
+        {diensten.length===0&&<p className="text-center text-gray-500 py-8 font-medium">Geen diensten</p>}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Toggle ─────────────────────────────────────────────── */
+function Toggle({on,onChange}:{on:boolean;onChange:(v:boolean)=>void}){
+  return(
+    <button type="button" onClick={()=>onChange(!on)}
+      className={`relative w-11 h-6 rounded-full transition-colors ${on?'bg-[#2176d4]':'bg-[#2a2a2a]'}`}>
+      <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${on?'translate-x-5':''}`}/>
+    </button>
+  )
+}
+
+/* ─── BlockedCalendar ────────────────────────────────────── */
+function BlockedCalendar({blocked,onChange}:{blocked:string[];onChange:(v:string[])=>void}){
+  const today=new Date()
+  const[ym,setYm]=useState(()=>`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
+  const[yr,mo]=ym.split('-').map(Number)
+  const first=new Date(yr,mo-1,1)
+  const totalDays=new Date(yr,mo,0).getDate()
+  const startDow=(first.getDay()+6)%7
+  function toggle(ds:string){
+    onChange(blocked.includes(ds)?blocked.filter(x=>x!==ds):[...blocked,ds])
+  }
+  const cells:React.ReactNode[]=[]
+  for(let i=0;i<startDow;i++)cells.push(<div key={`e${i}`}/>)
+  for(let d=1;d<=totalDays;d++){
+    const ds=`${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+    const isPast=ds<toDateStr(today)
+    const isBlocked=blocked.includes(ds)
+    cells.push(
+      <button key={ds} type="button" disabled={isPast} onClick={()=>toggle(ds)}
+        className={`aspect-square rounded-lg text-sm font-medium transition-colors ${isPast?'opacity-30 cursor-not-allowed bg-transparent text-gray-600':isBlocked?'bg-red-600/80 text-white':'bg-[#1a1a1a] text-gray-300 hover:bg-[#2176d4]/30 hover:text-white'}`}>
+        {d}
+      </button>
+    )
+  }
+  return(
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <button type="button" onClick={()=>{const d=new Date(yr,mo-2,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
+          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&lt;</button>
+        <span className="text-white font-bold capitalize">{NL_MONTHS_LONG[mo-1]} {yr}</span>
+        <button type="button" onClick={()=>{const d=new Date(yr,mo,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
+          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&gt;</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {NL_DAYS_SHORT.map(d=><div key={d} className="aspect-square flex items-center justify-center text-xs text-gray-500 font-medium">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">{cells}</div>
+    </div>
+  )
+}
+
+/* ─── PortalDatePicker ───────────────────────────────────── */
+function PortalDatePicker({value,onChange,min}:{value:string;onChange:(v:string)=>void;min?:string}){
+  const today=new Date()
+  const initDate=value?new Date(value+'T12:00:00'):today
+  const[ym,setYm]=useState(`${initDate.getFullYear()}-${String(initDate.getMonth()+1).padStart(2,'0')}`)
+  const[yr,mo]=ym.split('-').map(Number)
+  const first=new Date(yr,mo-1,1)
+  const totalDays=new Date(yr,mo,0).getDate()
+  const startDow=(first.getDay()+6)%7
+  const minStr=min??toDateStr(today)
+  const cells:React.ReactNode[]=[]
+  for(let i=0;i<startDow;i++)cells.push(<div key={`e${i}`}/>)
+  for(let d=1;d<=totalDays;d++){
+    const ds=`${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+    const disabled=ds<minStr
+    const selected=ds===value
+    cells.push(
+      <button key={ds} type="button" disabled={disabled} onClick={()=>onChange(ds)}
+        className={`aspect-square rounded-lg text-sm font-medium transition-colors ${disabled?'opacity-30 cursor-not-allowed text-gray-600':selected?'bg-[#2176d4] text-white':'bg-[#1a1a1a] text-gray-300 hover:bg-[#2176d4]/30 hover:text-white'}`}>
+        {d}
+      </button>
+    )
+  }
+  return(
+    <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl p-3">
+      <div className="flex items-center justify-between mb-3">
+        <button type="button" onClick={()=>{const d=new Date(yr,mo-2,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
+          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&lt;</button>
+        <span className="text-white font-bold text-sm capitalize">{NL_MONTHS_LONG[mo-1]} {yr}</span>
+        <button type="button" onClick={()=>{const d=new Date(yr,mo,1);setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}}
+          className="w-8 h-8 rounded-lg bg-[#1a1a1a] text-gray-300 hover:bg-[#2a2a2a] flex items-center justify-center text-lg">&gt;</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {NL_DAYS_SHORT.map(d=><div key={d} className="aspect-square flex items-center justify-center text-xs text-gray-500 font-medium">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">{cells}</div>
+    </div>
+  )
+}
+
+/* ─── WaitlistSection ────────────────────────────────────── */
+function WaitlistSection({slug}:{slug:string}){
+  const[list,setList]=useState<WachtlijstEntry[]>([])
+  const[loading,setLoading]=useState(true)
+  const[assigning,setAssigning]=useState<WachtlijstEntry|null>(null)
+  const[slots,setSlots]=useState<string[]>([])
+  const[diensten,setDiensten]=useState<{id:string;naam:string;prijs:number;duur:number}[]>([])
+  const[form,setForm]=useState({datum:'',dienst:'',slot:'',prijs:0,duur:0})
+  const[saving,setSaving]=useState(false)
+
+  useEffect(()=>{
+    Promise.all([
+      fetch('/api/wachtlijst').then(r=>r.json()),
+      fetch('/api/instellingen').then(r=>r.json()),
+    ]).then(([wd,sd])=>{
+      setList(wd.wachtlijst??[])
+      setDiensten(sd.instellingen?.diensten??[])
+      setLoading(false)
+    })
+  },[])
+
+  useEffect(()=>{
+    if(!form.datum||!form.dienst)return
+    const svc=diensten.find(d=>d.naam===form.dienst)
+    if(!svc)return
+    fetch(`/api/slots/${slug}?datum=${form.datum}&dienst=${svc.id}`).then(r=>r.json()).then(d=>{
+      setSlots(Array.isArray(d)?d:d.slots??[])
+    })
+  },[form.datum,form.dienst,slug,diensten])
+
+  async function assign(){
+    if(!assigning||!form.datum||!form.dienst||!form.slot)return
+    const svc=diensten.find(d=>d.naam===form.dienst)
+    setSaving(true)
+    await fetch('/api/wachtlijst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      wachtlijst_id:assigning.id,datum:form.datum,tijd:form.slot,
+      service:form.dienst,prijs:svc?.prijs??0,duur:svc?.duur??30,
+    })})
+    setSaving(false)
+    setAssigning(null)
+    const wd=await fetch('/api/wachtlijst').then(r=>r.json())
+    setList(wd.wachtlijst??[])
+  }
+
+  async function remove(id:string){
+    await fetch('/api/wachtlijst',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
+    setList(l=>l.filter(x=>x.id!==id))
+  }
+
+  const grouped=useMemo(()=>{
+    const m=new Map<string,WachtlijstEntry[]>()
+    for(const w of list){
+      const k=w.datum??'Geen datum'
+      const a=m.get(k)??[]
+      a.push(w)
+      m.set(k,a)
+    }
+    return Array.from(m.entries()).sort((a,b)=>a[0].localeCompare(b[0]))
+  },[list])
+
+  if(loading)return<div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+  return(
+    <div>
+      {list.length===0&&<p className="text-center text-gray-500 py-8 font-medium">Wachtlijst is leeg</p>}
+      {grouped.map(([datum,entries])=>(
+        <div key={datum} className="mb-4">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{datum==='Geen datum'?'Geen datum':formatLongDate(datum)}</p>
+          <div className="space-y-2">
+            {entries.map(w=>(
+              <div key={w.id} className="flex items-center justify-between bg-[#1a1a1a] rounded-xl p-3 gap-2">
+                <div className="min-w-0">
+                  <p className="font-bold text-white text-sm truncate">{w.naam}</p>
+                  <p className="text-xs text-gray-400">{w.service} · {w.telefoon}</p>
+                  <p className="text-xs text-gray-500">{w.email}</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={()=>{setAssigning(w);setForm({datum:'',dienst:w.service,slot:'',prijs:0,duur:0})}}
+                    className="px-3 py-1.5 bg-[#2176d4] text-white rounded-lg text-xs font-bold hover:bg-[#3080e0] transition-colors">
+                    Inplannen
+                  </button>
+                  <button onClick={()=>remove(w.id)}
+                    className="px-3 py-1.5 bg-red-600/20 text-red-400 rounded-lg text-xs font-bold hover:bg-red-600/30 transition-colors">
+                    Verwijder
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {assigning&&(
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold text-white mb-4">Inplannen: {assigning.naam}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-1.5">Dienst</label>
+                <select value={form.dienst} onChange={e=>setForm(f=>({...f,dienst:e.target.value,slot:''}))}
+                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#2176d4]">
+                  <option value="">Kies dienst</option>
+                  {diensten.map(d=><option key={d.id} value={d.naam}>{d.naam} (€{d.prijs})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-1.5">Datum</label>
+                <PortalDatePicker value={form.datum} onChange={d=>setForm(f=>({...f,datum:d,slot:''}))}/>
+              </div>
+              {form.datum&&form.dienst&&(
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1.5">Tijdslot</label>
+                  {slots.length===0?<p className="text-gray-500 text-sm">Geen vrije tijden</p>:(
+                    <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                      {slots.map(s=>(
+                        <button key={s} type="button" onClick={()=>setForm(f=>({...f,slot:s}))}
+                          className={`py-2 rounded-lg text-sm font-medium transition-colors ${form.slot===s?'bg-[#2176d4] text-white':'bg-[#1a1a1a] text-gray-300 hover:bg-[#2176d4]/30'}`}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={()=>setAssigning(null)} className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] text-gray-300 text-sm font-bold hover:bg-[#1a1a1a] transition-colors">Annuleer</button>
+              <button onClick={assign} disabled={saving||!form.datum||!form.dienst||!form.slot}
+                className="flex-1 py-2.5 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] transition-colors disabled:opacity-50">
+                {saving?'Bezig...':'Inplannen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── ManagementView ─────────────────────────────────────── */
+function ManagementView({session}:{session:Session}){
+  const[tab,setTab]=useState<'wachtlijst'|'bans'>('wachtlijst')
+  const[bans,setBans]=useState<GebandEmail[]>([])
+  const[bansLoading,setBansLoading]=useState(true)
+  const[banEmail,setBanEmail]=useState('')
+  const[banReden,setBanReden]=useState('')
+  const[banSaving,setBanSaving]=useState(false)
+  const[banError,setBanError]=useState('')
+
+  useEffect(()=>{
+    if(tab!=='bans')return
+    setBansLoading(true)
+    fetch('/api/ban').then(r=>r.json()).then(d=>{setBans(d.gebanned??[]);setBansLoading(false)})
+  },[tab])
+
+  async function addBan(){
+    if(!banEmail.trim())return
+    setBanError('');setBanSaving(true)
+    const r=await fetch('/api/ban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:banEmail.trim(),reden:banReden.trim()||'Geen reden opgegeven'})})
+    if(r.ok){
+      const d=await fetch('/api/ban').then(x=>x.json())
+      setBans(d.gebanned??[])
+      setBanEmail('');setBanReden('')
+    } else {
+      const d=await r.json()
+      setBanError(d.error??'Fout bij bannen')
+    }
+    setBanSaving(false)
+  }
+
+  async function unban(id:string){
+    await fetch('/api/ban',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
+    setBans(b=>b.filter(x=>x.id!==id))
+  }
+
+  return(
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <h2 className="text-2xl font-black text-white mb-6" style={{fontFamily:'var(--font-bebas)'}}>Beheer</h2>
+      <div className="flex gap-2 mb-6">
+        {(['wachtlijst','bans'] as const).map(t=>(
+          <button key={t} onClick={()=>setTab(t)}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${tab===t?'bg-[#2176d4] text-white':'bg-[#1a1a1a] text-gray-400 hover:text-white hover:bg-[#2a2a2a]'}`}>
+            {t==='wachtlijst'?'Wachtlijst':'Gebanned'}
+          </button>
+        ))}
+      </div>
+      {tab==='wachtlijst'&&<WaitlistSection slug={session.slug}/>}
+      {tab==='bans'&&(
+        <div>
+          <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-4 mb-6">
+            <h3 className="text-sm font-bold text-white mb-3">E-mail bannen</h3>
+            <div className="space-y-2">
+              <input value={banEmail} onChange={e=>setBanEmail(e.target.value)} placeholder="E-mailadres"
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
+              <input value={banReden} onChange={e=>setBanReden(e.target.value)} placeholder="Reden (optioneel)"
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
+              {banError&&<p className="text-red-400 text-xs">{banError}</p>}
+              <button onClick={addBan} disabled={banSaving||!banEmail.trim()}
+                className="w-full py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-500 transition-colors disabled:opacity-50">
+                {banSaving?'Bezig...':'Bannen'}
+              </button>
+            </div>
+          </div>
+          {bansLoading?<div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>:(
+            bans.length===0?<p className="text-center text-gray-500 py-8 font-medium">Geen gebande e-mails</p>:(
+              <div className="space-y-2">
+                {bans.map(b=>(
+                  <div key={b.id} className="flex items-center justify-between bg-[#1a1a1a] rounded-xl p-3 gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-white text-sm truncate">{b.email}</p>
+                      <p className="text-xs text-gray-400">{b.reden}</p>
+                      <p className="text-xs text-gray-500">{new Date(b.created_at).toLocaleDateString('nl-NL')}</p>
+                    </div>
+                    <button onClick={()=>unban(b.id)} className="px-3 py-1.5 bg-[#2176d4]/20 text-[#2176d4] rounded-lg text-xs font-bold hover:bg-[#2176d4]/30 transition-colors shrink-0">
+                      Unban
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── SettingsView ───────────────────────────────────────── */
+function SettingsView({session}:{session:Session}){
+  const[instellingen,setInstellingen]=useState<Record<string,unknown>|null>(null)
+  const[loading,setLoading]=useState(true)
+  const[schedule,setSchedule]=useState<Record<string,DayConfig>>(DEFAULT_SCHEDULE)
+  const[blocked,setBlocked]=useState<string[]>([])
+  const[savingSched,setSavingSched]=useState(false)
+  const[savedSched,setSavedSched]=useState(false)
+  const[currentPw,setCurrentPw]=useState('')
+  const[newPw,setNewPw]=useState('')
+  const[confirmPw,setConfirmPw]=useState('')
+  const[pwLoading,setPwLoading]=useState(false)
+  const[pwError,setPwError]=useState('')
+  const[pwOk,setPwOk]=useState(false)
+
+  useEffect(()=>{
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{
+      const inst=d.instellingen??{}
+      setInstellingen(inst)
+      if(inst.schema)setSchedule({...DEFAULT_SCHEDULE,...(inst.schema as Record<string,DayConfig>)})
+      if(inst.geblokkeerde_datums)setBlocked(inst.geblokkeerde_datums as string[])
+      setLoading(false)
+    })
+  },[])
+
+  async function saveSchedule(){
+    setSavingSched(true)
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'schema',value:schedule})})
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'geblokkeerde_datums',value:blocked})})
+    setSavingSched(false);setSavedSched(true);setTimeout(()=>setSavedSched(false),2000)
+  }
+
+  async function changePassword(){
+    if(newPw!==confirmPw){setPwError('Wachtwoorden komen niet overeen');return}
+    if(newPw.length<6){setPwError('Minimaal 6 tekens');return}
+    setPwError('');setPwLoading(true)
+    const check=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:session.email,wachtwoord:currentPw})})
+    if(!check.ok){setPwError('Huidig wachtwoord onjuist');setPwLoading(false);return}
+    const r=await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'wachtwoord',value:newPw})})
+    if(r.ok){setPwOk(true);setCurrentPw('');setNewPw('');setConfirmPw('');setTimeout(()=>setPwOk(false),3000)}
+    else{const d=await r.json();setPwError(d.error??'Fout bij wijzigen')}
+    setPwLoading(false)
+  }
+
+  function updateDay(dow:string,field:keyof DayConfig,val:unknown){
+    setSchedule(s=>({...s,[dow]:{...s[dow],[field]:val}}))
+  }
+  function addBreak(dow:string){
+    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:[...s[dow].breaks,{start:'12:00',end:'13:00'}]}}))
+  }
+  function removeBreak(dow:string,i:number){
+    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:s[dow].breaks.filter((_,j)=>j!==i)}}))
+  }
+  function updateBreak(dow:string,i:number,field:'start'|'end',val:string){
+    setSchedule(s=>({...s,[dow]:{...s[dow],breaks:s[dow].breaks.map((b,j)=>j===i?{...b,[field]:val}:b)}}))
+  }
+
+  if(loading)return<div className="flex justify-center py-20"><div className="w-8 h-8 border-3 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+  return(
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
+      <h2 className="text-2xl font-black text-white" style={{fontFamily:'var(--font-bebas)'}}>Instellingen</h2>
+
+      {/* Weekschema */}
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
+        <h3 className="text-base font-bold text-white mb-4">Weekschema</h3>
+        <div className="space-y-4">
+          {Object.entries(schedule).map(([dow,cfg])=>(
+            <div key={dow}>
+              <div className="flex items-center gap-3 mb-2">
+                <Toggle on={cfg.open} onChange={v=>updateDay(dow,'open',v)}/>
+                <span className="text-white font-bold text-sm w-24">{NL_DAY_LABELS[dow]}</span>
+                {cfg.open&&(
+                  <>
+                    <input type="time" value={cfg.start} onChange={e=>updateDay(dow,'start',e.target.value)}
+                      className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-[#2176d4]"/>
+                    <span className="text-gray-500 text-sm">–</span>
+                    <input type="time" value={cfg.end} onChange={e=>updateDay(dow,'end',e.target.value)}
+                      className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-[#2176d4]"/>
+                    <button type="button" onClick={()=>addBreak(dow)}
+                      className="ml-2 px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-xs text-gray-400 hover:text-white hover:border-[#2176d4] transition-colors">
+                      + Pauze
+                    </button>
+                  </>
+                )}
+              </div>
+              {cfg.open&&cfg.breaks.map((br,i)=>(
+                <div key={i} className="flex items-center gap-2 ml-16 mb-1">
+                  <span className="text-xs text-gray-500">Pauze:</span>
+                  <input type="time" value={br.start} onChange={e=>updateBreak(dow,i,'start',e.target.value)}
+                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-[#2176d4]"/>
+                  <span className="text-gray-500 text-xs">–</span>
+                  <input type="time" value={br.end} onChange={e=>updateBreak(dow,i,'end',e.target.value)}
+                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-[#2176d4]"/>
+                  <button type="button" onClick={()=>removeBreak(dow,i)} className="text-red-400 hover:text-red-300 text-xs ml-1">✕</button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Geblokkeerde datums */}
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
+        <h3 className="text-base font-bold text-white mb-4">Geblokkeerde datums</h3>
+        <BlockedCalendar blocked={blocked} onChange={setBlocked}/>
+        {blocked.length>0&&(
+          <div className="mt-3 flex flex-wrap gap-2">
+            {blocked.sort().map(d=>(
+              <span key={d} className="flex items-center gap-1.5 bg-red-600/20 text-red-400 rounded-lg px-2 py-1 text-xs font-medium">
+                {formatMedDate(d)}
+                <button onClick={()=>setBlocked(b=>b.filter(x=>x!==d))} className="hover:text-red-300">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button onClick={saveSchedule} disabled={savingSched}
+        className="w-full py-3 bg-[#2176d4] text-white rounded-2xl font-black text-base hover:bg-[#3080e0] transition-colors disabled:opacity-50">
+        {savingSched?'Opslaan...':savedSched?'Opgeslagen ✓':'Schema opslaan'}
+      </button>
+
+      {/* Export */}
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
+        <h3 className="text-base font-bold text-white mb-1">Export</h3>
+        <p className="text-sm text-gray-400 mb-3">Download alle komende afspraken als ICS-bestand.</p>
+        <a href="/api/portaal/export" download className="inline-block px-4 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] text-white rounded-xl text-sm font-bold hover:bg-[#2a2a2a] transition-colors">
+          Exporteer ICS
+        </a>
+        <div className="mt-4 pt-4 border-t border-[#2a2a2a]">
+          <CalendarSubscribeButton/>
+        </div>
+      </div>
+
+      {/* Wachtwoord */}
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
+        <h3 className="text-base font-bold text-white mb-4">Wachtwoord wijzigen</h3>
+        <div className="space-y-3">
+          <input type="password" value={currentPw} onChange={e=>setCurrentPw(e.target.value)} placeholder="Huidig wachtwoord"
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
+          <input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="Nieuw wachtwoord"
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
+          <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="Bevestig nieuw wachtwoord"
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-[#2176d4]"/>
+          {pwError&&<p className="text-red-400 text-xs">{pwError}</p>}
+          {pwOk&&<p className="text-green-400 text-xs">Wachtwoord gewijzigd</p>}
+          <button onClick={changePassword} disabled={pwLoading||!currentPw||!newPw||!confirmPw}
+            className="w-full py-2.5 bg-[#2176d4] text-white rounded-xl text-sm font-bold hover:bg-[#3080e0] transition-colors disabled:opacity-50">
+            {pwLoading?'Bezig...':'Wijzigen'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Root ───────────────────────────────────────────────── */
+export default function PortaalPage() {
+  const[checking,setChecking]=useState(true)
+  const[session,setSession]=useState<Session|null>(null)
+  const[authError,setAuthError]=useState(false)
+
+  useEffect(()=>{
+    const timer=setTimeout(()=>{setChecking(false);setAuthError(true)},8000)
+    fetch('/api/auth/me').then(r=>r.json()).then(d=>{
+      clearTimeout(timer); setChecking(false); if(d.session)setSession(d.session)
+    }).catch(()=>{clearTimeout(timer);setChecking(false)})
+    return()=>clearTimeout(timer)
+  },[])
+
+  async function logout(){await fetch('/api/auth/logout',{method:'POST'});setSession(null)}
+
+  if(checking)return(<div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-[#0c0c0c]"><div className="w-10 h-10 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/><p className="text-gray-500 text-sm font-medium">Even geduld...</p></div>)
+  if(authError)return(<div className="min-h-screen flex items-center justify-center bg-[#0c0c0c] px-4"><div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-8 max-w-sm w-full text-center"><p className="font-bold text-white mb-2">Verbinding mislukt</p><p className="text-gray-500 text-sm mb-4">De server reageert niet.</p><button onClick={()=>window.location.reload()} className="w-full py-2.5 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] transition-colors">Opnieuw proberen</button></div></div>)
+  if(!session)return<LoginScreen onLogin={()=>{ fetch('/api/auth/me').then(r=>r.json()).then(d=>{if(d.session)setSession(d.session)}) }}/>
+  return<PortalShell session={session} onLogout={logout}/>
 }

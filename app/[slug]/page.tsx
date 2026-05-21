@@ -38,24 +38,23 @@ export default async function KapperPage({
 
   if (annuleerCode || verzetCode) {
     return (
-      <main className="max-w-lg mx-auto w-full px-4 py-16">
-        <h1 className="text-2xl font-bold mb-1">{barber.naam}</h1>
-        <AnnuleerVerzet
-          slug={slug}
-          annuleerCode={annuleerCode}
-          verzetCode={verzetCode}
-          diensten={diensten}
-        />
-      </main>
+      <AnnuleerVerzet
+        slug={slug}
+        barberNaam={barber.naam}
+        annuleerCode={annuleerCode}
+        verzetCode={verzetCode}
+        diensten={diensten}
+      />
     )
   }
 
   return (
-    <main className="max-w-lg mx-auto w-full px-4 py-16">
-      <a href="/" className="text-sm text-zinc-400 hover:text-zinc-600 mb-6 inline-block">← Alle kappers</a>
-      <h1 className="text-3xl font-bold mb-1">{barber.naam}</h1>
-      {barber.bio && <p className="text-zinc-500 mb-8">{barber.bio}</p>}
-      <BookingForm slug={slug} diensten={diensten} />
-    </main>
+    <BookingForm
+      slug={slug}
+      diensten={diensten}
+      barberNaam={barber.naam}
+      barberBio={barber.bio ?? undefined}
+      barberFoto={barber.foto_url ?? undefined}
+    />
   )
 }

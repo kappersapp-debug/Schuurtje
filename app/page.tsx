@@ -13,41 +13,47 @@ export default async function Home() {
     .order('naam')
 
   return (
-    <main className="max-w-3xl mx-auto w-full px-4 py-16">
-      <h1 className="text-4xl font-bold mb-2">Schuurtje</h1>
-      <p className="text-zinc-500 mb-12">Kies jouw kapper en boek een afspraak.</p>
+    <div className="min-h-screen bg-[#0c0c0c] font-[family-name:var(--font-barlow)]">
+      <main className="max-w-2xl mx-auto px-4 py-16">
+        <div className="mb-12">
+          <h1 className="text-5xl font-black text-white tracking-tight mb-2" style={{fontFamily:'var(--font-bebas)'}}>
+            Schuurtje
+          </h1>
+          <p className="text-gray-500 text-base">Kies jouw kapper en boek een afspraak.</p>
+        </div>
 
-      {!kappers?.length && (
-        <p className="text-zinc-400">Er zijn momenteel geen kappers beschikbaar.</p>
-      )}
+        {!kappers?.length && (
+          <p className="text-gray-600 font-medium">Er zijn momenteel geen kappers beschikbaar.</p>
+        )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {kappers?.map((k: Pick<Barber, 'id' | 'naam' | 'slug' | 'bio' | 'foto_url'>) => (
-          <Link
-            key={k.id}
-            href={`/${k.slug}`}
-            className="flex items-center gap-4 p-4 rounded-2xl border border-zinc-200 hover:border-zinc-400 hover:shadow-sm transition-all"
-          >
-            <div className="w-14 h-14 rounded-full bg-zinc-100 overflow-hidden flex-shrink-0">
-              {k.foto_url ? (
-                <Image src={k.foto_url} alt={k.naam} width={56} height={56} className="object-cover w-full h-full" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-zinc-400">
-                  {k.naam[0]}
-                </div>
-              )}
-            </div>
-            <div>
-              <p className="font-semibold">{k.naam}</p>
-              {k.bio && <p className="text-sm text-zinc-500 line-clamp-2">{k.bio}</p>}
-            </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {kappers?.map((k: Pick<Barber, 'id'|'naam'|'slug'|'bio'|'foto_url'>) => (
+            <Link key={k.id} href={`/${k.slug}`}
+              className="flex items-center gap-4 p-4 rounded-2xl border border-[#2a2a2a] bg-[#141414] hover:border-[#2176d4]/50 hover:bg-[#2176d4]/5 transition-all group">
+              <div className="w-14 h-14 rounded-full bg-[#1a1a1a] overflow-hidden flex-shrink-0 ring-2 ring-[#2a2a2a] group-hover:ring-[#2176d4]/30 transition-all">
+                {k.foto_url ? (
+                  <Image src={k.foto_url} alt={k.naam} width={56} height={56} className="object-cover w-full h-full"/>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-xl font-black text-gray-600 group-hover:text-[#2176d4] transition-colors">
+                    {k.naam[0]}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-white group-hover:text-[#2176d4] transition-colors">{k.naam}</p>
+                {k.bio && <p className="text-sm text-gray-500 truncate">{k.bio}</p>}
+              </div>
+              <span className="ml-auto text-gray-700 group-hover:text-[#2176d4] transition-colors text-lg shrink-0">›</span>
+            </Link>
+          ))}
+        </div>
+
+        <footer className="mt-20 text-center">
+          <Link href="/portaal" className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+            Kappers portaal
           </Link>
-        ))}
-      </div>
-
-      <footer className="mt-20 text-center text-xs text-zinc-400">
-        <Link href="/portaal" className="hover:text-zinc-600">Kappers portaal</Link>
-      </footer>
-    </main>
+        </footer>
+      </main>
+    </div>
   )
 }

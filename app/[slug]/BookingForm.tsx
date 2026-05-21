@@ -1,358 +1,984 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import Image from 'next/image'
 import type { Service } from '@/lib/types'
 
-type Stap = 'dienst' | 'datum' | 'tijd' | 'gegevens' | 'verificatie' | 'klaar'
-type Beschikbaarheid = Record<string, 'beschikbaar' | 'bijna_vol' | 'vol' | 'gesloten'>
+/* ─── Types ──────────────────────────────────────────────── */
+interface BookingResult { code: string; service: string; prijs: number; duur: number; datum: string; tijd: string; naam: string }
 
-const MAANDEN = ['Januari','Februari','Maart','April','Mei','Juni','Juli','Augustus','September','Oktober','November','December']
-const DAGLETTERS = ['Ma','Di','Wo','Do','Vr','Za','Zo']
+/* ─── Constants ──────────────────────────────────────────── */
+const NL_DAYS_SHORT = ['Ma','Di','Wo','Do','Vr','Za','Zo']
+const NL_MONTHS     = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']
+const NL_DAYS_LONG  = ['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag']
 
-function nlVandaag() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' })
+/* ─── Helpers ────────────────────────────────────────────── */
+function formatDatumNL(ds: string) {
+  const d = new Date(ds + 'T12:00:00')
+  return `${NL_DAYS_LONG[d.getDay()]} ${d.getDate()} ${NL_MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
+function toDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
-export default function BookingForm({ slug, diensten }: { slug: string; diensten: Service[] }) {
-  const vandaag = nlVandaag()
-  const nu = new Date()
+function downloadICS(booking: BookingResult, barberNaam: string) {
+  const [year,month,day] = booking.datum.split('-').map(Number)
+  const [hour,min] = booking.tijd.split(':').map(Number)
+  const start = new Date(year,month-1,day,hour,min)
+  const end   = new Date(start.getTime() + booking.duur * 60000)
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}00`
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0',`PRODID:-//${barberNaam}//NL`,
+    'BEGIN:VEVENT',
+    `UID:${booking.code}@schuurtje.nl`,
+    `DTSTART;TZID=Europe/Amsterdam:${fmt(start)}`,
+    `DTEND;TZID=Europe/Amsterdam:${fmt(end)}`,
+    `SUMMARY:${booking.service} bij ${barberNaam}`,
+    `DESCRIPTION:Boekingscode: ${booking.code}`,
+    `LOCATION:${barberNaam}`,
+    `DTSTAMP:${fmt(new Date())}Z`,
+    'END:VEVENT','END:VCALENDAR',
+  ].join('\r\n')
+  const blob = new Blob([ics], { type: 'text/calendar' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `${booking.code}.ics`; a.click()
+  URL.revokeObjectURL(url)
+}
 
-  const [stap, setStap] = useState<Stap>('dienst')
-  const [dienst, setDienst] = useState<Service | null>(null)
-  const [datum, setDatum] = useState('')
-  const [tijd, setTijd] = useState('')
-  const [slots, setSlots] = useState<string[]>([])
-  const [slotsLaden, setSlotsLaden] = useState(false)
-  const [naam, setNaam] = useState('')
-  const [email, setEmail] = useState('')
-  const [telefoon, setTelefoon] = useState('')
-  const [notities, setNotities] = useState('')
-  const [laden, setLaden] = useState(false)
-  const [fout, setFout] = useState('')
-  const [code, setCode] = useState('')
+function googleCalLink(booking: BookingResult, barberNaam: string) {
+  const [year,month,day] = booking.datum.split('-').map(Number)
+  const [hour,min] = booking.tijd.split(':').map(Number)
+  const start = new Date(year,month-1,day,hour,min)
+  const end   = new Date(start.getTime() + booking.duur * 60000)
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}00`
+  const p = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `${booking.service} bij ${barberNaam}`,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    details: `Boekingscode: ${booking.code}`,
+    location: barberNaam,
+  })
+  return `https://www.google.com/calendar/render?${p}`
+}
 
-  // Kalender
-  const [kalJaar, setKalJaar] = useState(nu.getFullYear())
-  const [kalMaand, setKalMaand] = useState(nu.getMonth() + 1)
-  const [beschikbaarheid, setBeschikbaarheid] = useState<Beschikbaarheid>({})
-  const [beschLaden, setBeschLaden] = useState(false)
+/* ─── Calendar ───────────────────────────────────────────── */
+type Beschikbaarheid = Record<string, 'beschikbaar'|'bijna_vol'|'vol'|'gesloten'>
 
-  // Verificatie
-  const [verCode, setVerCode] = useState(['', '', '', '', '', ''])
-  const [verFout, setVerFout] = useState('')
-  const [verLaden, setVerLaden] = useState(false)
-  const [verVerzonden, setVerVerzonden] = useState(false)
-  const [cooldown, setCooldown] = useState(0)
-  const verRefs = useRef<(HTMLInputElement | null)[]>([])
+function Calendar({ value, onChange, beschikbaarheid, onMonthChange }: {
+  value: string
+  onChange: (date: string) => void
+  beschikbaarheid: Beschikbaarheid
+  onMonthChange?: (jaar: number, maand: number) => void
+}) {
+  const today = new Date(); today.setHours(0,0,0,0)
+  const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
 
-  // Terugkerende klant
-  useEffect(() => {
-    try {
-      const opgeslagen = JSON.parse(localStorage.getItem('sch_klant') ?? 'null')
-      if (opgeslagen?.naam) setNaam(opgeslagen.naam)
-      if (opgeslagen?.email) setEmail(opgeslagen.email)
-      if (opgeslagen?.telefoon) setTelefoon(opgeslagen.telefoon)
-    } catch {}
-  }, [])
+  const firstDay = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1)
+  const lastDay  = new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 0)
+  const startOffset = (firstDay.getDay()+6)%7
+  const cells: (Date|null)[] = Array(startOffset).fill(null)
+  for (let i=1; i<=lastDay.getDate(); i++) cells.push(new Date(viewMonth.getFullYear(), viewMonth.getMonth(), i))
 
-  useEffect(() => {
-    if (!dienst || !kalJaar || !kalMaand) return
-    setBeschLaden(true)
-    fetch(`/api/beschikbaarheid/${slug}?jaar=${kalJaar}&maand=${kalMaand}&dienst=${dienst.id}`)
-      .then((r) => r.json())
-      .then((d) => setBeschikbaarheid(d.beschikbaarheid ?? {}))
-      .finally(() => setBeschLaden(false))
-  }, [dienst, kalJaar, kalMaand, slug])
-
-  useEffect(() => {
-    if (cooldown <= 0) return
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [cooldown])
-
-  async function laadSlots(d: string) {
-    setSlotsLaden(true)
-    setSlots([])
-    try {
-      const res = await fetch(`/api/slots/${slug}?datum=${d}&dienst=${dienst!.id}`)
-      const data = await res.json()
-      setSlots(data.slots ?? [])
-    } finally {
-      setSlotsLaden(false)
-    }
+  function prevMonth() {
+    const m = new Date(viewMonth.getFullYear(), viewMonth.getMonth()-1, 1)
+    setViewMonth(m); onMonthChange?.(m.getFullYear(), m.getMonth()+1)
   }
-
-  async function stuurVerificatie() {
-    setVerLaden(true)
-    setVerFout('')
-    try {
-      const res = await fetch('/api/verify/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, slug }),
-      })
-      const data = await res.json()
-      if (data.banned) { setFout('Boeken niet mogelijk met dit e-mailadres'); return }
-      if (!res.ok) { setVerFout(data.error ?? 'Fout bij versturen'); return }
-      setVerVerzonden(true)
-      setCooldown(60)
-      setStap('verificatie')
-    } finally {
-      setVerLaden(false)
-    }
+  function nextMonth() {
+    const m = new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 1)
+    setViewMonth(m); onMonthChange?.(m.getFullYear(), m.getMonth()+1)
   }
-
-  async function controleerCode() {
-    const codeStr = verCode.join('')
-    if (codeStr.length !== 6) return
-    setVerLaden(true)
-    setVerFout('')
-    try {
-      const res = await fetch('/api/verify/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code: codeStr, slug }),
-      })
-      const data = await res.json()
-      if (!data.valid) { setVerFout(data.error ?? 'Onjuiste code'); return }
-      await boek()
-    } finally {
-      setVerLaden(false)
-    }
-  }
-
-  async function boek() {
-    setLaden(true)
-    setFout('')
-    try {
-      const res = await fetch('/api/boek', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, naam, email, telefoon, dienstId: dienst!.id, datum, tijd, notities }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setFout(data.error ?? 'Fout'); setStap('gegevens'); return }
-      try { localStorage.setItem('sch_klant', JSON.stringify({ naam, email, telefoon })) } catch {}
-      setCode(data.code)
-      setStap('klaar')
-    } finally {
-      setLaden(false)
-    }
-  }
-
-  function handleVerInput(i: number, val: string) {
-    if (!/^\d*$/.test(val)) return
-    const nieuw = [...verCode]
-    nieuw[i] = val.slice(-1)
-    setVerCode(nieuw)
-    if (val && i < 5) verRefs.current[i + 1]?.focus()
-    if (nieuw.every((c) => c !== '') && nieuw.join('').length === 6) {
-      setTimeout(() => controleerCode(), 50)
-    }
-  }
-
-  function handleVerPaste(e: React.ClipboardEvent) {
-    const tekst = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
-    if (tekst.length === 6) {
-      setVerCode(tekst.split(''))
-      verRefs.current[5]?.focus()
-      setTimeout(() => controleerCode(), 50)
-    }
-  }
-
-  // Kalender rendering
-  function renderKalender() {
-    const eerstedag = new Date(kalJaar, kalMaand - 1, 1).getDay()
-    const offset = (eerstedag + 6) % 7
-    const dagenInMaand = new Date(kalJaar, kalMaand, 0).getDate()
-    const cellen = Array(offset).fill(null).concat(
-      Array.from({ length: dagenInMaand }, (_, i) => i + 1)
-    )
-
-    return (
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <button onClick={() => { if (kalMaand === 1) { setKalMaand(12); setKalJaar(j => j-1) } else setKalMaand(m => m-1) }}
-            className="p-1 rounded-lg hover:bg-zinc-100 text-zinc-400">←</button>
-          <span className="font-medium text-sm">{MAANDEN[kalMaand-1]} {kalJaar}</span>
-          <button onClick={() => { if (kalMaand === 12) { setKalMaand(1); setKalJaar(j => j+1) } else setKalMaand(m => m+1) }}
-            className="p-1 rounded-lg hover:bg-zinc-100 text-zinc-400">→</button>
-        </div>
-        <div className="grid grid-cols-7 gap-1 mb-1">
-          {DAGLETTERS.map((d) => <div key={d} className="text-center text-xs text-zinc-400 py-1">{d}</div>)}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cellen.map((dag, i) => {
-            if (!dag) return <div key={i} />
-            const d = `${kalJaar}-${String(kalMaand).padStart(2,'0')}-${String(dag).padStart(2,'0')}`
-            const status = beschikbaarheid[d]
-            const verleden = d < vandaag
-            const geselecteerd = d === datum
-            const kleur = verleden || status === 'gesloten' ? 'text-zinc-300 cursor-default'
-              : status === 'bijna_vol' ? 'text-amber-600 hover:bg-amber-50 cursor-pointer'
-              : status === 'beschikbaar' ? 'text-zinc-900 hover:bg-zinc-100 cursor-pointer'
-              : 'text-zinc-300 cursor-default'
-
-            return (
-              <button key={i} disabled={verleden || !status || status === 'gesloten'}
-                onClick={() => { setDatum(d); laadSlots(d); setTijd(''); setStap('tijd') }}
-                className={`aspect-square rounded-lg text-sm flex items-center justify-center transition-colors
-                  ${geselecteerd ? 'bg-zinc-900 text-white' : kleur}
-                  ${beschLaden ? 'opacity-50' : ''}`}
-              >
-                {dag}
-              </button>
-            )
-          })}
-        </div>
-        <div className="flex gap-3 mt-2 text-xs text-zinc-400">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-900 inline-block"/>Beschikbaar</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>Bijna vol</span>
-        </div>
-      </div>
-    )
-  }
-
-  if (diensten.length === 0) return <p className="text-zinc-400">Nog geen diensten beschikbaar.</p>
-
-  if (stap === 'klaar') {
-    const agendaUrl = `/api/agenda/${slug}/${code}.ics`
-    return (
-      <div className="space-y-4">
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center">
-          <p className="text-2xl mb-1">Afspraak bevestigd!</p>
-          <p className="text-3xl font-bold tracking-widest text-green-700 my-3">{code}</p>
-          <p className="text-sm text-zinc-500">Bewaar deze code. Je ontvangt ook een bevestigingsmail.</p>
-        </div>
-        <div className="rounded-xl border border-zinc-200 p-4 text-sm space-y-1">
-          <p><strong>{dienst?.naam}</strong></p>
-          <p>{datum} om {tijd} · {dienst?.duur} min · €{dienst?.prijs}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <a href={agendaUrl} className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-zinc-200 text-sm hover:bg-zinc-50">
-            📅 Agenda toevoegen
-          </a>
-          <a href={`/${slug}?verzet=${code}`} className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-zinc-200 text-sm hover:bg-zinc-50">
-            🔄 Verzetten
-          </a>
-          <a href={`/${slug}?annuleer=${code}`} className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-zinc-200 text-sm hover:bg-zinc-50 col-span-2">
-            ❌ Annuleren
-          </a>
-        </div>
-      </div>
-    )
-  }
+  const canPrev = viewMonth > new Date(today.getFullYear(), today.getMonth(), 1)
 
   return (
-    <div className="space-y-8">
-      {/* Voortgangsbalk */}
-      <div className="flex gap-1">
-        {(['dienst','datum','tijd','gegevens','verificatie'] as Stap[]).map((s, i) => (
-          <div key={s} className={`h-1 flex-1 rounded-full transition-colors ${
-            ['dienst','datum','tijd','gegevens','verificatie'].indexOf(stap) >= i ? 'bg-zinc-900' : 'bg-zinc-200'
-          }`}/>
-        ))}
+    <div className="select-none">
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={prevMonth} disabled={!canPrev}
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#1e1e1e] hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-[#2176d4] font-bold text-lg">‹</button>
+        <span className="font-bold text-white capitalize">
+          {viewMonth.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' })}
+        </span>
+        <button onClick={nextMonth}
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#1e1e1e] hover:bg-[#2a2a2a] transition-colors text-[#2176d4] font-bold text-lg">›</button>
       </div>
-
-      {/* Stap 1: Dienst */}
-      <section>
-        <h2 className="font-semibold mb-3">Dienst</h2>
-        <div className="grid gap-2">
-          {diensten.map((d) => (
-            <button key={d.id}
-              onClick={() => { setDienst(d); setDatum(''); setTijd(''); setStap('datum') }}
-              className={`flex justify-between items-center px-4 py-3 rounded-xl border transition-all text-left ${
-                dienst?.id === d.id ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-200 hover:border-zinc-400'}`}
-            >
-              <span>{d.naam}</span>
-              <span className="text-sm opacity-70">€{d.prijs} · {d.duur} min</span>
+      <div className="grid grid-cols-7 mb-1">
+        {NL_DAYS_SHORT.map(d => <div key={d} className="text-center text-xs font-bold text-gray-600 py-1">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map((day, i) => {
+          if (!day) return <div key={i}/>
+          const ds = toDateStr(day)
+          const isPast = day < today
+          const status = beschikbaarheid[ds]
+          const gesloten = isPast || status === 'gesloten' || (!status && day > today)
+          const selected = ds === value
+          const isToday = day.getTime() === today.getTime()
+          return (
+            <button key={i} disabled={gesloten} onClick={() => onChange(ds)}
+              className={[
+                'aspect-square flex flex-col items-center justify-center rounded-xl text-sm font-semibold transition-all gap-0.5',
+                selected ? 'bg-[#2176d4] text-white shadow-[0_0_12px_rgba(33,118,212,0.35)]' : '',
+                isToday && !selected ? 'ring-1 ring-[#2176d4] text-[#2176d4] bg-[#2176d4]/10' : '',
+                gesloten ? 'text-gray-700 cursor-not-allowed' : !selected ? 'hover:bg-[#2176d4]/15 text-gray-400 hover:text-white' : '',
+              ].join(' ')}>
+              <span className="leading-none">{day.getDate()}</span>
+              {!gesloten && status && (
+                <span className={`w-1.5 h-1.5 rounded-full ${selected ? 'bg-white/60' : status === 'vol' ? 'bg-red-400' : status === 'bijna_vol' ? 'bg-amber-400' : 'bg-green-400'}`}/>
+              )}
             </button>
-          ))}
-        </div>
-      </section>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
-      {/* Stap 2: Datum */}
-      {stap !== 'dienst' && (
-        <section>
-          <h2 className="font-semibold mb-3">Datum {datum && <span className="font-normal text-zinc-500">— {datum}</span>}</h2>
-          {renderKalender()}
-        </section>
-      )}
-
-      {/* Stap 3: Tijd */}
-      {(stap === 'tijd' || stap === 'gegevens' || stap === 'verificatie') && datum && (
-        <section>
-          <h2 className="font-semibold mb-3">Tijd {tijd && <span className="font-normal text-zinc-500">— {tijd}</span>}</h2>
-          {slotsLaden && <p className="text-zinc-400 text-sm">Laden...</p>}
-          {!slotsLaden && slots.length === 0 && <p className="text-zinc-400 text-sm">Geen tijden beschikbaar op deze dag.</p>}
-          <div className="grid grid-cols-4 gap-2">
-            {slots.map((s) => (
-              <button key={s} onClick={() => { setTijd(s); setStap('gegevens') }}
-                className={`py-2 rounded-xl border text-sm transition-all ${
-                  tijd === s ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-200 hover:border-zinc-400'}`}
-              >{s}</button>
-            ))}
+/* ─── Progress ───────────────────────────────────────────── */
+function Progress({ step }: { step: number }) {
+  const labels = ['Dienst','Datum','Tijd','Gegevens','Verificatie']
+  return (
+    <div className="flex items-start justify-between mb-8">
+      {labels.map((label, i) => {
+        const n = i+1; const active = n===step; const done = n<step
+        return (
+          <div key={n} className="flex flex-col items-center flex-1 relative">
+            {i>0 && <div className={`absolute top-4 right-1/2 w-full h-0.5 -translate-y-1/2 ${n<=step?'bg-[#2176d4]':'bg-[#333]'}`}/>}
+            <div className={['w-8 h-8 rounded-full flex items-center justify-center text-xs font-black mb-1 relative z-10 transition-all',
+              done?'bg-[#2176d4] text-white':active?'bg-[#2176d4] text-white ring-4 ring-[#2176d4]/20':'bg-[#222] text-gray-600',
+            ].join(' ')}>
+              {done?'✓':n}
+            </div>
+            <span className={`text-[9px] sm:text-xs font-semibold ${active||done?'text-[#2176d4]':'text-gray-600'}`}>{label}</span>
           </div>
-        </section>
-      )}
+        )
+      })}
+    </div>
+  )
+}
 
-      {/* Stap 4: Gegevens */}
-      {(stap === 'gegevens' || stap === 'verificatie') && tijd && (
-        <section>
-          <h2 className="font-semibold mb-3">Jouw gegevens</h2>
-          {naam && email && telefoon && stap === 'gegevens' && (
-            <div className="mb-3 p-3 bg-zinc-50 rounded-xl text-sm text-zinc-600">
-              Welkom terug, <strong>{naam}</strong>!
+/* ─── Main Component ─────────────────────────────────────── */
+export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string }) {
+  const [step, setStep]         = useState<number|'bevestiging'|'geblokkeerd'>(1)
+  const [dienst, setDienst]     = useState<Service|null>(null)
+  const [datum, setDatum]       = useState('')
+  const [tijd, setTijd]         = useState('')
+  const [slots, setSlots]       = useState<string[]>([])
+  const [slotsLaden, setSlotsLaden] = useState(false)
+  const [contact, setContact]   = useState({ naam: '', telefoon: '', email: '' })
+  const [notities, setNotities] = useState('')
+  const [codeDigits, setCodeDigits] = useState(['','','','','',''])
+  const [booking, setBooking]   = useState<BookingResult|null>(null)
+  const [laden, setLaden]       = useState(false)
+  const [fout, setFout]         = useState('')
+  const [veldFouten, setVeldFouten] = useState<Record<string,string>>({})
+  const [beschikbaarheid, setBeschikbaarheid] = useState<Beschikbaarheid>({})
+  const [annuleerBevestig, setAnnuleerBevestig] = useState(false)
+  const [annuleerStatus, setAnnuleerStatus] = useState<'idle'|'checking'|'actief'|'geannuleerd'|'niet_gevonden'>('idle')
+  const [emailVerzonden, setEmailVerzonden] = useState(true)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [annuleerEmail, setAnnuleerEmail] = useState('')
+  const [lookup, setLookup]     = useState(false)
+  const [lookupCode, setLookupCode] = useState('')
+  const [lookupEmail, setLookupEmail] = useState('')
+  const [lookupResult, setLookupResult] = useState<{code:string;naam:string;service:string;prijs:number;datum:string;tijd:string}|null>(null)
+  const [lookupFout, setLookupFout] = useState('')
+  const [lookupLaden, setLookupLaden] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
+  const savedEmailRef = useRef('')
+  const [cookieConsent, setCookieConsent] = useState<'yes'|'no'|null>(null)
+  const [showWachtlijst, setShowWachtlijst] = useState(false)
+  const [wlForm, setWlForm]     = useState({ naam: '', telefoon: '', email: '' })
+  const [wlStap, setWlStap]     = useState<'form'|'verify'>('form')
+  const [wlCodeDigits, setWlCodeDigits] = useState(['','','','','',''])
+  const [wlLaden, setWlLaden]   = useState(false)
+  const [wlFout, setWlFout]     = useState('')
+  const [wlResend, setWlResend] = useState(0)
+  const [wlKlaar, setWlKlaar]   = useState(false)
+  const wlCodeRefs = useRef<(HTMLInputElement|null)[]>([])
+  const [showVerzet, setShowVerzet]         = useState(false)
+  const [verzetDatum, setVerzetDatum]       = useState('')
+  const [verzetTijd, setVerzetTijd]         = useState('')
+  const [verzetSlots, setVerzetSlots]       = useState<string[]>([])
+  const [verzetSlotsLaden, setVerzetSlotsLaden] = useState(false)
+  const [verzetFout, setVerzetFout]         = useState('')
+  const [verzetLaden, setVerzetLaden]       = useState(false)
+  const [verzetKlaar, setVerzetKlaar]       = useState(false)
+  const codeRefs = useRef<(HTMLInputElement|null)[]>([])
+
+  function getCookie(name: string) {
+    return document.cookie.split('; ').find(r=>r.startsWith(name+'='))?.split('=').slice(1).join('=')??null
+  }
+  function saveCustomerCookie(naam: string, telefoon: string, email: string) {
+    if (getCookie('sch_consent') !== 'yes') return
+    const val = encodeURIComponent(JSON.stringify({ naam, telefoon, email }))
+    const exp = new Date(Date.now()+90*24*60*60*1000).toUTCString()
+    document.cookie = `sch_customer=${val}; expires=${exp}; path=/; SameSite=Lax`
+  }
+  function acceptCookies() {
+    const exp = new Date(Date.now()+365*24*60*60*1000).toUTCString()
+    document.cookie = `sch_consent=yes; expires=${exp}; path=/; SameSite=Lax`
+    setCookieConsent('yes')
+  }
+  function declineCookies() {
+    const exp = new Date(Date.now()+365*24*60*60*1000).toUTCString()
+    document.cookie = `sch_consent=no; expires=${exp}; path=/; SameSite=Lax`
+    document.cookie = 'sch_customer=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
+    setCookieConsent('no'); setIsReturning(false)
+  }
+
+  useEffect(() => {
+    const consent = getCookie('sch_consent')
+    if (consent) {
+      setCookieConsent(consent as 'yes'|'no')
+      if (consent === 'yes') {
+        const raw = getCookie('sch_customer')
+        if (raw) {
+          try {
+            const saved = JSON.parse(decodeURIComponent(raw))
+            if (saved.email && saved.naam) {
+              setContact({ naam: saved.naam, telefoon: saved.telefoon??'', email: saved.email })
+              setWlForm(f => ({ ...f, naam: saved.naam, telefoon: saved.telefoon??'', email: saved.email }))
+              savedEmailRef.current = saved.email
+              setIsReturning(true)
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+  }, [])
+
+  async function fetchBeschikbaarheid(jaar: number, maand: number, dienstId: string) {
+    try {
+      const r = await fetch(`/api/beschikbaarheid/${slug}?jaar=${jaar}&maand=${maand}&dienst=${dienstId}`)
+      if (!r.ok) return
+      const d = await r.json()
+      setBeschikbaarheid(prev => ({ ...prev, ...(d.beschikbaarheid??{}) }))
+    } catch { /* non-fatal */ }
+  }
+
+  async function fetchSlots(d: string, dienstId: string) {
+    setSlotsLaden(true); setSlots([])
+    try {
+      const r = await fetch(`/api/slots/${slug}?datum=${d}&dienst=${dienstId}`)
+      const data = await r.json()
+      setSlots(data.slots ?? [])
+    } finally { setSlotsLaden(false) }
+  }
+
+  async function handleContactSubmit(e: React.FormEvent) {
+    e.preventDefault(); setFout('')
+    const errs: Record<string,string> = {}
+    if (!contact.naam.trim()) errs.naam = 'Naam is verplicht'
+    if (!contact.telefoon.trim()) errs.telefoon = 'Telefoonnummer is verplicht'
+    if (!contact.email.trim()) errs.email = 'E-mailadres is verplicht'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) errs.email = 'Ongeldig e-mailadres'
+    if (Object.keys(errs).length) { setVeldFouten(errs); return }
+    setVeldFouten({}); setLaden(true)
+
+    if (isReturning && contact.email.toLowerCase() === savedEmailRef.current.toLowerCase()) {
+      try {
+        const br = await fetch('/api/boek', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ slug, naam: contact.naam, email: contact.email, telefoon: contact.telefoon, dienstId: dienst!.id, datum, tijd, notities }),
+        })
+        const bd = await br.json()
+        if (!br.ok) {
+          if (bd.error === 'Boeken niet mogelijk') { setStep('geblokkeerd'); return }
+          setFout(bd.error ?? 'Boeking mislukt'); return
+        }
+        saveCustomerCookie(contact.naam, contact.telefoon, contact.email)
+        setBooking({ code: bd.code, service: dienst!.naam, prijs: dienst!.prijs, duur: dienst!.duur, datum, tijd, naam: contact.naam })
+        setStep('bevestiging')
+      } catch { setFout('Netwerkfout, probeer opnieuw') }
+      finally { setLaden(false) }
+      return
+    }
+
+    try {
+      const r = await fetch('/api/verify/send', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: contact.email, slug }),
+      })
+      const data = await r.json()
+      if (data.banned) { setStep('geblokkeerd'); return }
+      if (!r.ok) { setFout(data.error ?? 'Fout bij verzenden code'); return }
+      setEmailVerzonden(true)
+      setStep(5); setResendCooldown(60)
+      const iv = setInterval(() => setResendCooldown(s => { if (s<=1){clearInterval(iv);return 0} return s-1 }), 1000)
+    } catch { setFout('Netwerkfout, probeer opnieuw') }
+    finally { setLaden(false) }
+  }
+
+  async function handleVerify(overrideDigits?: string[]) {
+    setFout(''); setLaden(true)
+    const code = (overrideDigits??codeDigits).join('')
+    try {
+      const vr = await fetch('/api/verify/check', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: contact.email, code, slug }),
+      })
+      const vd = await vr.json()
+      if (!vr.ok || !vd.valid) { setFout(vd.error ?? 'Ongeldige code'); return }
+
+      const br = await fetch('/api/boek', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ slug, naam: contact.naam, email: contact.email, telefoon: contact.telefoon, dienstId: dienst!.id, datum, tijd, notities }),
+      })
+      const bd = await br.json()
+      if (!br.ok) { setFout(bd.error ?? 'Boeking mislukt'); return }
+      saveCustomerCookie(contact.naam, contact.telefoon, contact.email)
+      savedEmailRef.current = contact.email; setIsReturning(true)
+      setBooking({ code: bd.code, service: dienst!.naam, prijs: dienst!.prijs, duur: dienst!.duur, datum, tijd, naam: contact.naam })
+      setStep('bevestiging')
+    } catch { setFout('Netwerkfout, probeer opnieuw') }
+    finally { setLaden(false) }
+  }
+
+  async function handleResendCode() {
+    if (resendCooldown > 0) return
+    setFout(''); setCodeDigits(['','','','','',''])
+    await fetch('/api/verify/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: contact.email, slug }) })
+    codeRefs.current[0]?.focus()
+    setResendCooldown(60)
+    const iv = setInterval(() => setResendCooldown(s => { if(s<=1){clearInterval(iv);return 0} return s-1 }), 1000)
+  }
+
+  async function handleAnnuleer() {
+    if (!booking) return
+    const emailToUse = contact.email || annuleerEmail
+    if (!emailToUse) return
+    setLaden(true)
+    try {
+      const r = await fetch('/api/annuleer', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ code: booking.code, email: emailToUse }),
+      })
+      if (!r.ok) { setFout('Annuleren mislukt. Controleer uw e-mailadres.'); return }
+      setStep(1); setDienst(null); setDatum(''); setTijd('')
+      setContact({ naam:'', telefoon:'', email:'' }); setBooking(null); setAnnuleerBevestig(false); setAnnuleerEmail('')
+    } finally { setLaden(false) }
+  }
+
+  async function handleLookup(e: React.FormEvent) {
+    e.preventDefault(); setLookupFout(''); setLookupResult(null); setLookupLaden(true)
+    try {
+      const r = await fetch('/api/boekingen/opzoeken', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ code: lookupCode.trim().toUpperCase(), email: lookupEmail.trim() }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setLookupFout('Geen afspraak gevonden. Controleer uw code en e-mailadres.'); return }
+      const a = d.afspraak
+      setLookupResult({ code: a.code, naam: a.naam, service: a.service, prijs: a.prijs, datum: a.datum, tijd: a.tijd })
+    } finally { setLookupLaden(false) }
+  }
+
+  function handleCodeInput(i: number, val: string) {
+    const digit = val.replace(/\D/g,'').slice(-1)
+    const next = [...codeDigits]; next[i] = digit; setCodeDigits(next)
+    if (digit && i<5) { codeRefs.current[i+1]?.focus() }
+    else if (digit && i===5 && next.every(d=>d!=='')) { setTimeout(() => handleVerify(next), 50) }
+  }
+  function handleCodeKey(i: number, e: React.KeyboardEvent) {
+    if (e.key==='Backspace' && !codeDigits[i] && i>0) codeRefs.current[i-1]?.focus()
+  }
+  function handleCodePaste(e: React.ClipboardEvent) {
+    const text = e.clipboardData.getData('text').replace(/\D/g,'').slice(0,6)
+    if (text.length===6) { const digits=text.split(''); setCodeDigits(digits); codeRefs.current[5]?.focus(); e.preventDefault(); setTimeout(() => handleVerify(digits), 50) }
+  }
+
+  async function handleWachtlijstSubmit() {
+    setWlFout('')
+    if (!wlForm.naam.trim() || !wlForm.telefoon.trim() || !wlForm.email.trim()) { setWlFout('Alle velden zijn verplicht'); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wlForm.email)) { setWlFout('Ongeldig e-mailadres'); return }
+    setWlLaden(true)
+    const skipVerify = isReturning && wlForm.email.toLowerCase() === savedEmailRef.current.toLowerCase()
+    if (skipVerify) {
+      try {
+        const wr = await fetch('/api/wachtlijst', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ slug, naam: wlForm.naam, telefoon: wlForm.telefoon, email: wlForm.email, service: dienst?.naam??'', datum }) })
+        const wd = await wr.json()
+        if (!wr.ok) { setWlFout(wd.error??'Aanmelding mislukt'); setWlLaden(false); return }
+        saveCustomerCookie(wlForm.naam, wlForm.telefoon, wlForm.email)
+        savedEmailRef.current = wlForm.email; setIsReturning(true)
+        setContact({ naam: wlForm.naam, telefoon: wlForm.telefoon, email: wlForm.email })
+      } catch { setWlFout('Netwerkfout'); setWlLaden(false); return }
+      setWlLaden(false); setWlKlaar(true); return
+    }
+    try {
+      const r = await fetch('/api/verify/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: wlForm.email, slug }) })
+      const d = await r.json()
+      if (!r.ok) { setWlFout(d.error??'Fout bij verzenden code'); setWlLaden(false); return }
+      setWlStap('verify'); setWlResend(60)
+      const iv = setInterval(() => setWlResend(s => { if(s<=1){clearInterval(iv);return 0} return s-1 }), 1000)
+    } catch { setWlFout('Netwerkfout') }
+    setWlLaden(false)
+  }
+
+  function handleWlCodeInput(i: number, val: string) {
+    const digit = val.replace(/\D/g,'').slice(-1)
+    const next = [...wlCodeDigits]; next[i] = digit; setWlCodeDigits(next)
+    if (digit && i<5) { wlCodeRefs.current[i+1]?.focus() }
+    else if (digit && i===5 && next.every(d=>d!=='')) { setTimeout(() => handleWlVerify(next), 50) }
+  }
+  function handleWlCodeKey(i: number, e: React.KeyboardEvent) {
+    if (e.key==='Backspace' && !wlCodeDigits[i] && i>0) wlCodeRefs.current[i-1]?.focus()
+  }
+  function handleWlCodePaste(e: React.ClipboardEvent) {
+    const text = e.clipboardData.getData('text').replace(/\D/g,'').slice(0,6)
+    if (text.length===6) { const digits=text.split(''); setWlCodeDigits(digits); wlCodeRefs.current[5]?.focus(); e.preventDefault(); setTimeout(() => handleWlVerify(digits), 50) }
+  }
+
+  async function handleWlVerify(overrideDigits?: string[]) {
+    setWlFout(''); setWlLaden(true)
+    try {
+      const vr = await fetch('/api/verify/check', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: wlForm.email, code: (overrideDigits??wlCodeDigits).join(''), slug }) })
+      const vd = await vr.json()
+      if (!vr.ok || !vd.valid) { setWlFout(vd.error??'Ongeldige code'); setWlLaden(false); return }
+      const wr = await fetch('/api/wachtlijst', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ slug, naam: wlForm.naam, telefoon: wlForm.telefoon, email: wlForm.email, service: dienst?.naam??'', datum }) })
+      const wd = await wr.json()
+      if (!wr.ok) { setWlFout(wd.error??'Aanmelding mislukt'); setWlLaden(false); return }
+      saveCustomerCookie(wlForm.naam, wlForm.telefoon, wlForm.email)
+      savedEmailRef.current = wlForm.email; setIsReturning(true)
+      setContact({ naam: wlForm.naam, telefoon: wlForm.telefoon, email: wlForm.email })
+      setWlKlaar(true)
+    } catch { setWlFout('Netwerkfout') }
+    setWlLaden(false)
+  }
+
+  async function fetchVerzetSlots(d: string) {
+    if (!dienst) return
+    setVerzetSlotsLaden(true); setVerzetSlots([])
+    try {
+      const r = await fetch(`/api/slots/${slug}?datum=${d}&dienst=${dienst.id}`)
+      if (!r.ok) { setVerzetSlots([]); return }
+      setVerzetSlots((await r.json()).slots??[])
+    } catch { setVerzetSlots([]) }
+    finally { setVerzetSlotsLaden(false) }
+  }
+
+  function openVerzet() {
+    setShowVerzet(true); setVerzetKlaar(false)
+    setVerzetDatum(''); setVerzetTijd(''); setVerzetFout('')
+    if (booking) {
+      const now = new Date()
+      const d = diensten.find(d=>d.naam===booking.service)
+      if (d) fetchBeschikbaarheid(now.getFullYear(), now.getMonth()+1, d.id)
+    }
+  }
+
+  async function handleVerzet() {
+    if (!booking || !verzetDatum || !verzetTijd) return
+    setVerzetLaden(true); setVerzetFout('')
+    try {
+      const r = await fetch('/api/verzet', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ code: booking.code, datum: verzetDatum, tijd: verzetTijd }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setVerzetFout(d.error??'Verzetten mislukt'); return }
+      setBooking(b => b?{...b, datum: verzetDatum, tijd: verzetTijd}:b)
+      setVerzetKlaar(true)
+      setTimeout(() => { setShowVerzet(false); setVerzetKlaar(false); setVerzetDatum(''); setVerzetTijd('') }, 2500)
+    } catch { setVerzetFout('Netwerkfout, probeer opnieuw') }
+    finally { setVerzetLaden(false) }
+  }
+
+  useEffect(() => {
+    if (step===3 && !slotsLaden && slots.length===0 && !wlKlaar) {
+      setShowWachtlijst(true)
+    }
+  }, [step, slotsLaden, slots, wlKlaar])
+
+  /* ── Render ── */
+  return (
+    <div className="min-h-screen bg-[#0c0c0c] flex flex-col font-[family-name:var(--font-barlow)]">
+      <header className="bg-[#0e0e0e] border-b border-[#1e1e1e]">
+        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <a href="/" className="text-gray-600 hover:text-gray-400 transition-colors text-sm font-medium shrink-0">←</a>
+            {barberFoto ? (
+              <Image src={barberFoto} alt={barberNaam} width={38} height={38} className="rounded-full object-cover ring-2 ring-[#2176d4]/30 shrink-0"/>
+            ) : (
+              <div className="w-9 h-9 rounded-full bg-[#1a1a1a] ring-2 ring-[#2a2a2a] flex items-center justify-center text-base font-black text-gray-500 shrink-0">
+                {barberNaam[0]}
+              </div>
+            )}
+            <div>
+              <h1 className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-xl leading-none">{barberNaam}</h1>
+              {barberBio && <p className="text-gray-600 text-[10px] tracking-wide truncate max-w-[180px]">{barberBio}</p>}
+            </div>
+          </div>
+          <button onClick={()=>setLookup(true)}
+            className="text-xs font-semibold text-gray-500 hover:text-[#2176d4] transition-colors whitespace-nowrap">
+            Afspraak opzoeken
+          </button>
+        </div>
+      </header>
+      <main className="flex-1 flex items-start justify-center px-4 py-8">
+        <div className="w-full max-w-lg bg-[#141414] rounded-2xl border border-[#2a2a2a] overflow-hidden shadow-2xl">
+
+          {step==='geblokkeerd'&&(
+            <div className="p-8 text-center">
+              <div className="w-14 h-14 bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">✗</div>
+              <h2 className="text-xl font-bold text-white mb-2">Toegang Geblokkeerd</h2>
+              <p className="text-gray-500 mb-1">Uw e-mailadres is geblokkeerd voor het maken van afspraken.</p>
+              <p className="text-gray-600 text-sm">Neem contact op met de kapper voor meer informatie.</p>
             </div>
           )}
-          <div className="space-y-3">
-            <input placeholder="Naam *" value={naam} onChange={(e) => setNaam(e.target.value)}
-              className="border border-zinc-200 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-zinc-900" />
-            <input type="email" placeholder="E-mailadres *" value={email} onChange={(e) => setEmail(e.target.value)}
-              className="border border-zinc-200 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-zinc-900" />
-            <input type="tel" placeholder="Telefoonnummer *" value={telefoon} onChange={(e) => setTelefoon(e.target.value)}
-              className="border border-zinc-200 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-zinc-900" />
-            <textarea placeholder="Opmerkingen (optioneel)" value={notities} onChange={(e) => setNotities(e.target.value)}
-              rows={2} className="border border-zinc-200 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-zinc-900 resize-none" />
-          </div>
-          {fout && <p className="text-red-500 text-sm mt-2">{fout}</p>}
-          <div className="mt-4 p-3 bg-zinc-50 rounded-xl text-sm text-zinc-600">
-            <p><strong>{dienst?.naam}</strong> op {datum} om {tijd}</p>
-            <p>€{dienst?.prijs} · {dienst?.duur} min</p>
-          </div>
-          {stap === 'gegevens' && (
-            <button onClick={stuurVerificatie} disabled={verLaden || !naam || !email || !telefoon}
-              className="mt-4 w-full py-3 rounded-xl bg-zinc-900 text-white font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors">
-              {verLaden ? 'Bezig...' : 'Verificatiecode ontvangen →'}
-            </button>
-          )}
-        </section>
-      )}
 
-      {/* Stap 5: Verificatie */}
-      {stap === 'verificatie' && (
-        <section>
-          <h2 className="font-semibold mb-1">Verificatiecode</h2>
-          <p className="text-sm text-zinc-500 mb-4">Voer de 6-cijferige code in die we naar <strong>{email}</strong> hebben gestuurd.</p>
-          <div className="flex gap-2 justify-center" onPaste={handleVerPaste}>
-            {verCode.map((c, i) => (
-              <input key={i} ref={(el) => { verRefs.current[i] = el }}
-                value={c} onChange={(e) => handleVerInput(i, e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Backspace' && !c && i > 0) verRefs.current[i-1]?.focus() }}
-                maxLength={1} inputMode="numeric"
-                className="w-12 h-14 text-center text-2xl font-bold border-2 border-zinc-200 rounded-xl focus:outline-none focus:border-zinc-900 transition-colors"
-              />
-            ))}
+          {step==='bevestiging'&&booking&&annuleerStatus==='checking'&&(
+            <div className="p-8 flex justify-center">
+              <div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>
+            </div>
+          )}
+
+          {step==='bevestiging'&&booking&&(annuleerStatus==='geannuleerd'||annuleerStatus==='niet_gevonden')&&(
+            <div className="p-8 text-center">
+              <div className="w-14 h-14 bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-400 text-2xl">✗</div>
+              <h2 className="text-xl font-bold text-white mb-2">Afspraak niet gevonden</h2>
+              <p className="text-gray-500 text-sm">
+                {annuleerStatus==='geannuleerd'?'Deze afspraak is al geannuleerd.':'Deze afspraak bestaat niet.'}
+              </p>
+              <button onClick={()=>{setStep(1);setBooking(null);setAnnuleerStatus('idle')}}
+                className="mt-6 px-6 py-2.5 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] transition-colors">
+                Nieuwe afspraak maken
+              </button>
+            </div>
+          )}
+
+          {step==='bevestiging'&&booking&&(annuleerStatus==='idle'||annuleerStatus==='actief')&&(
+            <div className="p-6 sm:p-8">
+              <div className="text-center mb-6">
+                <div className="w-14 h-14 bg-[#2176d4]/15 rounded-full flex items-center justify-center mx-auto mb-3 text-xl font-bold text-[#2176d4]">✓</div>
+                <h2 className="text-xl font-bold text-white">Afspraak Bevestigd</h2>
+                <p className="text-gray-500 text-sm mt-1">U ontvangt een bevestiging per e-mail</p>
+              </div>
+              <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-xl p-5 mb-5 text-center">
+                <p className="text-xs font-bold text-[#2176d4]/70 uppercase tracking-widest mb-1">Boekingscode</p>
+                <p className="text-3xl font-black text-[#2176d4] tracking-widest">{booking.code}</p>
+              </div>
+              <div className="mb-6 rounded-xl overflow-hidden border border-[#2a2a2a] divide-y divide-[#1e1e1e]">
+                {[['Dienst',booking.service],['Datum',formatDatumNL(booking.datum)],['Tijd',booking.tijd],['Prijs',`€${booking.prijs}`]].map(([k,v])=>(
+                  <div key={k} className="flex justify-between px-4 py-3 text-sm">
+                    <span className="text-gray-500 font-medium">{k}</span>
+                    <span className="font-bold text-white">{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-3">
+                <button onClick={()=>downloadICS(booking,barberNaam)}
+                  className="w-full py-3 px-4 rounded-xl border border-[#2a2a2a] text-gray-300 font-medium hover:border-[#2176d4]/50 hover:text-white transition-all">
+                  Agenda toevoegen (.ics)
+                </button>
+                <a href={googleCalLink(booking,barberNaam)} target="_blank" rel="noopener noreferrer"
+                  className="block w-full py-3 px-4 rounded-xl border border-[#2a2a2a] text-gray-300 font-medium hover:border-[#2176d4]/50 hover:text-white transition-all text-center">
+                  Google Agenda
+                </a>
+                {showVerzet?(
+                  verzetKlaar?(
+                    <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-xl p-5 text-center">
+                      <div className="w-10 h-10 bg-[#2176d4]/15 rounded-full flex items-center justify-center mx-auto mb-2 text-[#2176d4] font-black text-lg">✓</div>
+                      <p className="font-bold text-white">Afspraak verzet!</p>
+                      <p className="text-xs text-gray-500 mt-1">{formatDatumNL(verzetDatum)} · {verzetTijd}</p>
+                    </div>
+                  ):(
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-white text-sm">Afspraak verzetten</h3>
+                        <button onClick={()=>setShowVerzet(false)} className="text-gray-500 hover:text-white text-xl leading-none transition-colors">×</button>
+                      </div>
+                      <Calendar value={verzetDatum} beschikbaarheid={beschikbaarheid}
+                        onMonthChange={(j,m)=>{ const d=diensten.find(d=>d.naam===booking.service); if(d)fetchBeschikbaarheid(j,m,d.id) }}
+                        onChange={d=>{setVerzetDatum(d);setVerzetTijd('');fetchVerzetSlots(d)}}/>
+                      {verzetDatum&&(
+                        verzetSlotsLaden?(
+                          <div className="flex justify-center py-3"><div className="w-6 h-6 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>
+                        ):(
+                          <div>
+                            <p className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Kies een tijdslot</p>
+                            {verzetSlots.length===0?(
+                              <p className="text-gray-500 text-sm text-center py-2">Geen tijden beschikbaar op deze dag</p>
+                            ):(
+                              <div className="grid grid-cols-4 gap-2">
+                                {verzetSlots.map(slot=>(
+                                  <button key={slot} onClick={()=>setVerzetTijd(slot)}
+                                    className={['py-2.5 rounded-xl text-sm font-bold transition-all',
+                                      verzetTijd===slot?'bg-[#2176d4] text-white shadow-[0_0_15px_rgba(33,118,212,0.3)]'
+                                        :'bg-[#1a1a1a] border border-[#2a2a2a] text-[#2176d4] hover:bg-[#2176d4] hover:text-white hover:border-[#2176d4]',
+                                    ].join(' ')}>
+                                    {slot}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+                      {verzetFout&&<p className="text-red-400 text-sm font-semibold">{verzetFout}</p>}
+                      <button onClick={handleVerzet} disabled={!verzetDatum||!verzetTijd||verzetLaden}
+                        className="w-full py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] disabled:opacity-40 transition-all">
+                        {verzetLaden?'Bezig...':'Bevestigen'}
+                      </button>
+                    </div>
+                  )
+                ):!annuleerBevestig?(
+                  <div className="space-y-1">
+                    <button onClick={()=>{setStep(1);setDienst(null);setDatum('');setTijd('');setBooking(null);setAnnuleerBevestig(false);setAnnuleerStatus('idle')}}
+                      className="w-full py-2.5 text-[#2176d4] font-bold text-sm hover:text-white transition-colors">
+                      Nieuwe afspraak maken →
+                    </button>
+                    <button onClick={openVerzet}
+                      className="w-full py-2.5 text-[#2176d4] font-semibold text-sm hover:text-white transition-colors">
+                      Afspraak verzetten →
+                    </button>
+                    <button onClick={()=>setAnnuleerBevestig(true)}
+                      className="w-full py-2 text-red-400 font-semibold text-sm hover:text-red-300 transition-colors">
+                      Afspraak annuleren
+                    </button>
+                  </div>
+                ):(
+                  <div className="bg-red-900/15 border border-red-700/30 rounded-xl p-4">
+                    <p className="text-gray-300 font-semibold mb-3 text-sm text-center">Weet u zeker dat u wilt annuleren?</p>
+                    {!contact.email&&!lookupResult&&(
+                      <input type="email" placeholder="Uw e-mailadres ter bevestiging" value={annuleerEmail}
+                        onChange={e=>setAnnuleerEmail(e.target.value)}
+                        className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm mb-3 focus:outline-none focus:border-red-500 transition-colors"/>
+                    )}
+                    {fout&&<p className="text-red-400 text-xs font-semibold mb-2">{fout}</p>}
+                    <div className="flex gap-3">
+                      <button onClick={()=>{setAnnuleerBevestig(false);setFout('')}}
+                        className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] font-bold text-gray-400 text-sm hover:border-[#333] hover:text-white transition-all">Nee</button>
+                      <button onClick={handleAnnuleer} disabled={laden||(!contact.email&&!lookupResult&&!annuleerEmail)}
+                        className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-500 disabled:opacity-50 transition-colors">
+                        {laden?'...':'Ja, annuleren'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {typeof step==='number'&&(
+            <div className="p-6 sm:p-8">
+              <Progress step={step}/>
+
+              {fout&&(
+                <div className="bg-red-900/30 border border-red-700/40 text-red-400 rounded-xl px-4 py-3 mb-5 text-sm font-semibold">
+                  {fout}
+                </div>
+              )}
+
+              {step===1&&(
+                <div>
+                  <h2 className="text-xl font-black text-white mb-1">Kies een dienst</h2>
+                  <p className="text-gray-500 text-sm mb-5">Selecteer de gewenste behandeling</p>
+                  <div className="space-y-3">
+                    {diensten.map(s=>(
+                      <button key={s.id} onClick={()=>{
+                        setDienst(s); setStep(2)
+                        const now=new Date(); fetchBeschikbaarheid(now.getFullYear(),now.getMonth()+1,s.id)
+                      }}
+                        className={['w-full flex items-center justify-between p-4 rounded-xl border transition-all text-left',
+                          dienst?.id===s.id?'border-[#2176d4] bg-[#2176d4]/10':'border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#2176d4]/50 hover:bg-[#2176d4]/5',
+                        ].join(' ')}>
+                        <div>
+                          <p className="font-bold text-white">{s.naam}</p>
+                          <p className="text-sm text-gray-500">{s.duur} minuten</p>
+                        </div>
+                        <p className="text-2xl font-black text-[#2176d4] ml-4">€{s.prijs}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {step===2&&(
+                <div>
+                  <h2 className="text-xl font-black text-white mb-1">Kies een datum</h2>
+                  <p className="text-gray-500 text-sm mb-5">Selecteer een beschikbare dag</p>
+                  <Calendar value={datum} beschikbaarheid={beschikbaarheid}
+                    onMonthChange={(j,m)=>fetchBeschikbaarheid(j,m,dienst!.id)}
+                    onChange={d=>{
+                      setDatum(d); setTijd('')
+                      setShowWachtlijst(false); setWlKlaar(false); setWlStap('form'); setWlCodeDigits(['','','','','','']); setWlFout('')
+                      fetchSlots(d,dienst!.id); setStep(3)
+                    }}/>
+                  <div className="mt-6">
+                    <button onClick={()=>setStep(1)}
+                      className="w-full py-3 rounded-xl border border-[#2a2a2a] font-bold text-gray-400 hover:border-[#333] hover:text-white transition-all">‹ Terug</button>
+                  </div>
+                </div>
+              )}
+
+              {step===3&&(
+                <div>
+                  <h2 className="text-xl font-black text-white mb-1">Kies een tijd</h2>
+                  <p className="text-gray-500 text-sm mb-5 capitalize">{datum?formatDatumNL(datum):''}</p>
+                  {slotsLaden?(
+                    <div className="flex justify-center py-8">
+                      <div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>
+                    </div>
+                  ):slots.length===0?(
+                    <div className="py-2">
+                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+                        <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                        <div>
+                          <p className="text-sm font-bold text-amber-400">Dag vol</p>
+                          <p className="text-xs text-amber-500/70">Meld je aan voor de wachtlijst hieronder</p>
+                        </div>
+                      </div>
+                      {/* Waitlist UI */}
+                      {!wlKlaar?(
+                        wlStap==='verify'?(
+                          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5 space-y-4">
+                            <div>
+                              <h3 className="font-bold text-white text-sm">Verificatie</h3>
+                              <p className="text-xs text-gray-500 mt-1">Code verstuurd naar <span className="text-white">{wlForm.email}</span></p>
+                            </div>
+                            {wlFout&&<p className="text-red-400 text-sm font-semibold">{wlFout}</p>}
+                            <div className="flex justify-center gap-2" onPaste={handleWlCodePaste}>
+                              {wlCodeDigits.map((digit,i)=>(
+                                <input key={i} ref={el=>{wlCodeRefs.current[i]=el}} type="text" inputMode="numeric" maxLength={1} value={digit}
+                                  onChange={e=>handleWlCodeInput(i,e.target.value)} onKeyDown={e=>handleWlCodeKey(i,e)}
+                                  className="w-10 h-12 text-center text-xl font-black bg-[#0e0e0e] border-2 border-[#2a2a2a] text-white rounded-xl focus:outline-none focus:border-[#2176d4] transition-colors caret-transparent"/>
+                              ))}
+                            </div>
+                            <button onClick={()=>handleWlVerify()} disabled={wlCodeDigits.join('').length<6||wlLaden}
+                              className="w-full py-2.5 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] disabled:opacity-40 transition-all">
+                              {wlLaden?'Bevestigen...':'Bevestigen'}
+                            </button>
+                            <button onClick={async()=>{if(wlResend>0)return;setWlCodeDigits(['','','','','','']);const r=await fetch('/api/verify/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:wlForm.email,slug})});if(r.ok){setWlResend(60);const iv=setInterval(()=>setWlResend(s=>{if(s<=1){clearInterval(iv);return 0}return s-1}),1000)}}} disabled={wlResend>0}
+                              className="w-full py-1.5 text-xs font-semibold text-[#2176d4] disabled:text-gray-700 disabled:cursor-not-allowed transition-colors">
+                              {wlResend>0?`Opnieuw sturen (${wlResend}s)`:'Code opnieuw sturen'}
+                            </button>
+                          </div>
+                        ):(
+                          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5 space-y-4">
+                            <h3 className="font-bold text-white text-sm">Wachtlijst voor {datum?new Date(datum+'T12:00:00').toLocaleDateString('nl-NL',{day:'numeric',month:'long'}):'deze dag'}</h3>
+                            {isReturning&&wlForm.email.toLowerCase()===savedEmailRef.current.toLowerCase()&&(
+                              <div className="flex items-center gap-2 bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-xl px-3 py-2">
+                                <svg className="w-4 h-4 text-[#2176d4] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                                <p className="text-xs text-[#2176d4]">Welkom terug, <strong>{wlForm.naam}</strong> — geen verificatie nodig</p>
+                              </div>
+                            )}
+                            {wlFout&&<p className="text-red-400 text-sm font-semibold">{wlFout}</p>}
+                            {[{label:'Naam *',key:'naam',type:'text',placeholder:'Uw naam'},{label:'Telefoon *',key:'telefoon',type:'tel',placeholder:'06 12345678'},{label:'E-mail *',key:'email',type:'email',placeholder:'uw@email.com'}].map(f=>(
+                              <div key={f.key}>
+                                <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">{f.label}</label>
+                                <input type={f.type} value={wlForm[f.key as keyof typeof wlForm]} onChange={e=>setWlForm(x=>({...x,[f.key]:e.target.value}))} placeholder={f.placeholder}
+                                  className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+                              </div>
+                            ))}
+                            <div className="flex gap-3 pt-1">
+                              <button onClick={()=>setShowWachtlijst(false)}
+                                className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] text-gray-400 text-sm font-medium hover:border-[#333] transition-all">Annuleren</button>
+                              <button disabled={!wlForm.naam||!wlForm.telefoon||!wlForm.email||wlLaden} onClick={handleWachtlijstSubmit}
+                                className="flex-1 py-2.5 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] disabled:opacity-40 transition-all">
+                                {wlLaden?'Bezig...':isReturning&&wlForm.email.toLowerCase()===savedEmailRef.current.toLowerCase()?'Aanmelden':'Verificeren →'}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      ):(
+                        <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-2xl px-5 py-4 text-center">
+                          <p className="font-bold text-[#2176d4] text-sm">✓ Je staat op de wachtlijst!</p>
+                          <p className="text-xs text-gray-500 mt-1">We nemen contact op als er een plek vrijkomt.</p>
+                        </div>
+                      )}
+                    </div>
+                  ):(
+                    <div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {slots.map(slot=>(
+                          <button key={slot} onClick={()=>{setTijd(slot);setStep(4)}}
+                            className={['py-3 rounded-xl text-sm font-bold transition-all',
+                              tijd===slot?'bg-[#2176d4] text-white shadow-[0_0_15px_rgba(33,118,212,0.3)]'
+                                :'bg-[#1a1a1a] border border-[#2a2a2a] text-[#2176d4] hover:bg-[#2176d4] hover:text-white hover:border-[#2176d4]',
+                            ].join(' ')}>
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-3 mt-6">
+                    <button onClick={()=>{setStep(2);setShowWachtlijst(false);setWlKlaar(false);setWlStap('form');setWlFout('');setWlCodeDigits(['','','','','',''])}}
+                      className="flex-1 py-3 rounded-xl border border-[#2a2a2a] font-bold text-gray-400 hover:border-[#333] hover:text-white transition-all">‹ Terug</button>
+                    <button disabled={!tijd} onClick={()=>setStep(4)}
+                      className="flex-1 py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                      Volgende ›
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step===4&&(
+                <form onSubmit={handleContactSubmit} noValidate>
+                  <h2 className="text-xl font-black text-white mb-1">Uw gegevens</h2>
+                  {isReturning&&contact.email.toLowerCase()===savedEmailRef.current.toLowerCase()?(
+                    <div className="flex items-center gap-2 bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-xl px-4 py-2.5 mb-5">
+                      <svg className="w-4 h-4 text-[#2176d4] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      <p className="text-sm text-[#2176d4]">Welkom terug, <strong>{contact.naam}</strong> — geen verificatie nodig</p>
+                    </div>
+                  ):(
+                    <p className="text-gray-500 text-sm mb-5">Vul uw contactinformatie in</p>
+                  )}
+                  <div className="space-y-4">
+                    {[
+                      {label:'Naam',key:'naam',type:'text',placeholder:'Uw volledige naam',autoComplete:'name'},
+                      {label:'Telefoonnummer',key:'telefoon',type:'tel',placeholder:'+31 6 12345678',autoComplete:'tel'},
+                      {label:'E-mailadres',key:'email',type:'email',placeholder:'uw@email.com',autoComplete:'email'},
+                    ].map(f=>(
+                      <div key={f.key}>
+                        <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">
+                          {f.label}
+                          {f.key==='email'&&!isReturning&&<span className="normal-case font-normal text-[10px] ml-1 text-gray-600">(voor verificatie)</span>}
+                        </label>
+                        <input type={f.type} placeholder={f.placeholder} autoComplete={f.autoComplete}
+                          value={contact[f.key as keyof typeof contact]}
+                          onChange={e=>{setContact(c=>({...c,[f.key]:e.target.value}));setVeldFouten(fe=>({...fe,[f.key]:''}))} }
+                          className={`w-full bg-[#0e0e0e] border text-white placeholder-gray-700 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none transition-colors ${veldFouten[f.key]?'border-red-500/70 focus:border-red-500':'border-[#2a2a2a] focus:border-[#2176d4]'}`}/>
+                        {veldFouten[f.key]&&<p className="mt-1.5 text-xs text-red-400 font-semibold">{veldFouten[f.key]}</p>}
+                      </div>
+                    ))}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Notities <span className="normal-case font-normal text-gray-600">(optioneel)</span></label>
+                      <textarea value={notities} onChange={e=>setNotities(e.target.value)} rows={2} placeholder="Bijzonderheden of wensen"
+                        className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-[#2176d4] transition-colors resize-none"/>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                    <button type="button" onClick={()=>setStep(3)}
+                      className="flex-1 py-3 rounded-xl border border-[#2a2a2a] font-bold text-gray-400 hover:border-[#333] hover:text-white transition-all">‹ Terug</button>
+                    <button type="submit" disabled={laden}
+                      className="flex-1 py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all">
+                      {laden?'Bezig...':'Volgende ›'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {step===5&&(
+                <div>
+                  <h2 className="text-xl font-black text-white mb-1">Verificatie</h2>
+                  {emailVerzonden?(
+                    <>
+                      <p className="text-gray-500 text-sm mb-1">We hebben een 6-cijferige code gestuurd naar</p>
+                      <p className="font-bold text-white mb-3">{contact.email}</p>
+                      <div className="bg-[#2176d4]/8 border border-[#2176d4]/20 rounded-xl px-4 py-2.5 mb-5 text-xs text-[#2176d4]/80">
+                        Het kan 1 à 2 minuten duren voordat u de code ontvangt. Check ook uw spam.
+                      </div>
+                    </>
+                  ):(
+                    <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-6 text-sm">
+                      <p className="font-bold text-amber-400">E-mail kon niet worden verzonden</p>
+                    </div>
+                  )}
+                  <div className="flex justify-center gap-2 mb-6" onPaste={handleCodePaste}>
+                    {codeDigits.map((digit,i)=>(
+                      <input key={i} ref={el=>{codeRefs.current[i]=el}}
+                        type="text" inputMode="numeric" maxLength={1} value={digit}
+                        onChange={e=>handleCodeInput(i,e.target.value)} onKeyDown={e=>handleCodeKey(i,e)}
+                        className="w-11 h-14 text-center text-2xl font-black bg-[#0e0e0e] border-2 border-[#2a2a2a] text-white rounded-xl focus:outline-none focus:border-[#2176d4] transition-colors caret-transparent"/>
+                    ))}
+                  </div>
+                  <button onClick={()=>handleVerify()} disabled={codeDigits.join('').length<6||laden}
+                    className="w-full py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-40 disabled:cursor-not-allowed transition-all mb-3">
+                    {laden?'Bevestigen...':'Bevestigen'}
+                  </button>
+                  <button onClick={handleResendCode} disabled={resendCooldown>0}
+                    className="w-full py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-gray-700 text-[#2176d4] hover:text-[#3080e0]">
+                    {resendCooldown>0?`Code opnieuw sturen (${resendCooldown}s)`:'Code opnieuw sturen'}
+                  </button>
+                  <button onClick={()=>setStep(4)} className="w-full py-2 text-gray-600 text-sm hover:text-gray-400 transition-colors mt-1">‹ Terug</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Afspraak opzoeken */}
+      <div className="max-w-lg mx-auto w-full px-4 mb-6">
+        {!lookup?(
+          <button onClick={()=>setLookup(true)}
+            className="w-full py-3 rounded-xl border border-[#2a2a2a] bg-[#141414] text-gray-500 text-sm hover:border-[#333] hover:text-gray-300 transition-all">
+            Afspraak opzoeken of annuleren
+          </button>
+        ):(
+          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-white text-sm">Afspraak opzoeken</h3>
+              <button onClick={()=>{setLookup(false);setLookupResult(null);setLookupFout('');setLookupCode('');setLookupEmail('')}}
+                className="w-7 h-7 rounded-lg bg-[#1e1e1e] text-gray-500 hover:text-white flex items-center justify-center text-lg leading-none transition-colors">×</button>
+            </div>
+            <form onSubmit={handleLookup} className="space-y-2 mb-4">
+              <input value={lookupCode} onChange={e=>setLookupCode(e.target.value.toUpperCase())}
+                placeholder="Boekingscode (bijv. SCHABC123)" maxLength={10}
+                className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-4 py-2.5 text-sm font-mono font-bold focus:outline-none focus:border-[#2176d4] transition-colors uppercase"/>
+              <div className="flex gap-2">
+                <input type="email" value={lookupEmail} onChange={e=>setLookupEmail(e.target.value)}
+                  placeholder="Uw e-mailadres"
+                  className="flex-1 bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+                <button type="submit" disabled={lookupCode.length<5||!lookupEmail||lookupLaden}
+                  className="px-4 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] disabled:opacity-40 transition-colors">
+                  {lookupLaden?'...':'Zoek'}
+                </button>
+              </div>
+            </form>
+            {lookupFout&&(
+              <div className="bg-red-900/30 border border-red-700/40 text-red-400 rounded-xl px-4 py-2.5 text-sm font-semibold mb-2">{lookupFout}</div>
+            )}
+            {lookupResult&&(
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-4 divide-y divide-[#1e1e1e]">
+                {[['Code',lookupResult.code],['Naam',lookupResult.naam],['Dienst',lookupResult.service],['Datum',formatDatumNL(lookupResult.datum)],['Tijd',lookupResult.tijd],['Prijs',`€${lookupResult.prijs}`]].map(([k,v])=>(
+                  <div key={k} className="flex justify-between py-2 text-sm">
+                    <span className="text-gray-500 font-medium">{k}</span>
+                    <span className={`font-bold ${k==='Code'?'text-[#2176d4] font-black':'text-white'}`}>{v}</span>
+                  </div>
+                ))}
+                <button onClick={()=>{
+                  setBooking({...lookupResult,duur:0})
+                  setAnnuleerEmail(lookupEmail)
+                  setStep('bevestiging');setAnnuleerBevestig(true);setAnnuleerStatus('actief');setLookup(false)
+                }} className="w-full mt-2 pt-3 py-2 text-red-400 text-sm font-bold hover:text-red-300 transition-colors">
+                  Afspraak annuleren
+                </button>
+              </div>
+            )}
           </div>
-          {verFout && <p className="text-red-500 text-sm mt-3 text-center">{verFout}</p>}
-          {verLaden && <p className="text-zinc-400 text-sm mt-3 text-center">Controleren...</p>}
-          <div className="mt-4 text-center">
-            <button onClick={stuurVerificatie} disabled={cooldown > 0 || verLaden}
-              className="text-sm text-zinc-500 hover:text-zinc-900 disabled:opacity-50">
-              {cooldown > 0 ? `Opnieuw sturen (${cooldown}s)` : 'Code opnieuw sturen'}
-            </button>
+        )}
+      </div>
+
+      <footer className="text-center text-gray-700 text-xs py-4" style={{paddingBottom:'max(2rem, env(safe-area-inset-bottom, 0px))'}}>
+        © {new Date().getFullYear()} {barberNaam}
+      </footer>
+
+      {cookieConsent===null&&step===1&&(
+        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 animate-fade-up" style={{paddingBottom:'max(1rem, env(safe-area-inset-bottom, 0px))'}}>
+          <div className="max-w-lg mx-auto bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-semibold mb-0.5">Cookies</p>
+              <p className="text-gray-500 text-xs">We slaan uw naam en e-mail op zodat u volgende keer sneller kunt boeken.</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button onClick={declineCookies}
+                className="px-4 py-2 rounded-xl border border-[#2a2a2a] text-gray-400 text-sm font-semibold hover:border-[#333] hover:text-white transition-all">
+                Weigeren
+              </button>
+              <button onClick={acceptCookies}
+                className="px-4 py-2 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] transition-all">
+                Accepteren
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
       )}
     </div>
   )

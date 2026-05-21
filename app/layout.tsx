@@ -1,20 +1,38 @@
-import type { Metadata } from 'next'
-import { Geist } from 'next/font/google'
+import type { Metadata, Viewport } from 'next'
+import { Nunito, Barlow, Bebas_Neue } from 'next/font/google'
 import './globals.css'
 
-const geist = Geist({ subsets: ['latin'], variable: '--font-geist' })
+const nunito = Nunito({
+  subsets: ['latin'],
+  variable: '--font-nunito',
+  weight: ['400', '500', '600', '700', '800', '900'],
+})
+
+const barlow = Barlow({
+  subsets: ['latin'],
+  variable: '--font-barlow',
+  weight: ['400', '500', '600', '700'],
+})
+
+const bebasNeue = Bebas_Neue({
+  subsets: ['latin'],
+  variable: '--font-bebas',
+  weight: ['400'],
+})
 
 export const metadata: Metadata = {
   title: 'Schuurtje — kappers platform',
   description: 'Boek een afspraak bij jouw kapper',
 }
 
+export const viewport: Viewport = {
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="nl" className={`${geist.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-white text-zinc-900 antialiased">
-        {children}
-      </body>
+    <html lang="nl" className={`${nunito.variable} ${barlow.variable} ${bebasNeue.variable}`}>
+      <body className="min-h-screen bg-[#0c0c0c]">{children}</body>
     </html>
   )
 }

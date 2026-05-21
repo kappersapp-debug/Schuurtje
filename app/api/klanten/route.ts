@@ -8,33 +8,36 @@ export async function GET(req: NextRequest) {
   const session = await getKapperSession()
   if (!session) return Response.json({ error: 'Niet ingelogd' }, { status: 401 })
 
-  const url = new URL(req.url)
-  const zoek = url.searchParams.get('q')?.toLowerCase()
-
   const { data, error } = await supabaseAdmin
     .from('bookings')
-    .select('naam, email, telefoon, datum')
+    .select('email, naam, service, prijs, datum, tijd, code')
     .eq('barber_id', session.id)
-    .eq('geannuleerd', false)
     .order('datum', { ascending: false })
 
   if (error) return Response.json({ error: 'DB fout' }, { status: 500 })
 
-  // Deduplicate op email, meest recente datum bewaren
-  const map = new Map<string, { naam: string; email: string; telefoon: string; laatste: string }>()
-  for (const row of data ?? []) {
-    const existing = map.get(row.email)
-    if (!existing || row.datum > existing.laatste) {
-      map.set(row.email, { naam: row.naam, email: row.email, telefoon: row.telefoon, laatste: row.datum })
+  const map = new Map<string, {
+    email: string; naam: string; bezoeken: number; totaalBesteed: number
+    lastDate: string; lastService: string
+    afspraken: typeof data
+  }>()
+
+  for (const b of (data ?? []).filter(b => b.email)) {
+    const key = b.email.toLowerCase()
+    if (!map.has(key)) {
+      map.set(key, { email: key, naam: b.naam, bezoeken: 0, totaalBesteed: 0, lastDate: '', lastService: '', afspraken: [] })
+    }
+    const c = map.get(key)!
+    c.bezoeken++
+    c.totaalBesteed += b.prijs ?? 0
+    c.afspraken!.push(b)
+    if (b.datum > c.lastDate) {
+      c.lastDate = b.datum
+      c.lastService = b.service
+      c.naam = b.naam
     }
   }
 
-  let klanten = Array.from(map.values()).sort((a, b) => a.naam.localeCompare(b.naam))
-  if (zoek) {
-    klanten = klanten.filter(
-      (k) => k.naam.toLowerCase().includes(zoek) || k.email.toLowerCase().includes(zoek)
-    )
-  }
-
+  const klanten = Array.from(map.values()).sort((a, b) => (b.lastDate > a.lastDate ? 1 : -1))
   return Response.json({ klanten })
 }
