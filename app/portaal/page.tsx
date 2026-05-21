@@ -79,37 +79,15 @@ function AnimatedNumber({value}:{value:number|string}) {
 function CalendarSubscribeButton() {
   const[url,setUrl]=useState<string|null>(null)
   const[laden,setLaden]=useState(true)
-  const[gekopieerd,setGekopieerd]=useState(false)
   useEffect(()=>{
     fetch('/api/portaal/calendar-url').then(r=>r.json()).then(d=>{if(d.url)setUrl(d.url)}).catch(()=>{}).finally(()=>setLaden(false))
   },[])
-  function kopieer(){
-    if(!url)return
-    navigator.clipboard.writeText(url).then(()=>{setGekopieerd(true);setTimeout(()=>setGekopieerd(false),2000)}).catch(()=>{})
-  }
-  if(laden)return(
-    <div className="border border-[#2a2a2a] rounded-xl px-4 py-3 flex items-center gap-2 text-gray-600 text-sm">
-      <div className="w-3.5 h-3.5 border-2 border-gray-700 border-t-[#2176d4] rounded-full animate-spin"/>
-      Agenda abonnement laden...
-    </div>
-  )
-  if(!url)return null
+  if(laden||!url)return null
   return(
-    <div className="border border-[#2a2a2a] rounded-xl p-4 space-y-3">
-      <div>
-        <p className="font-bold text-white text-sm mb-0.5">📅 Agenda abonnement</p>
-        <p className="text-xs text-gray-500">Voeg al uw afspraken toe aan Apple Agenda, Google Agenda of Outlook. Wordt automatisch gesynchroniseerd.</p>
-      </div>
-      <div className="flex gap-2">
-        <a href={url.replace(/^https?:\/\//,'webcal://')} className="flex-1 px-3 py-2 bg-[#2176d4] text-white rounded-lg font-bold text-sm hover:bg-[#3080e0] transition-colors text-center">
-          Abonneren
-        </a>
-        <button onClick={kopieer} className={`px-3 py-2 rounded-lg font-bold text-sm border transition-colors ${gekopieerd?'border-green-700/50 text-green-400 bg-green-900/20':'border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444]'}`}>
-          {gekopieerd?'Gekopieerd ✓':'Kopieer URL'}
-        </button>
-      </div>
-      <p className="text-[10px] text-gray-700 break-all font-mono">{url}</p>
-    </div>
+    <a href={url.replace(/^https?:\/\//,'webcal://')} className="flex items-center gap-2 px-4 py-2 border border-[#2a2a2a] text-gray-300 rounded-xl font-bold text-sm hover:border-[#2176d4] hover:text-[#2176d4] transition-colors">
+      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+      Agenda abonneren
+    </a>
   )
 }
 
