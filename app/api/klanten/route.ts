@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     .from('bookings')
     .select('email, naam, service, prijs, datum, tijd, code')
     .eq('barber_id', session.id)
+    .eq('geannuleerd', false)
     .order('datum', { ascending: false })
 
   if (error) return Response.json({ error: 'DB fout' }, { status: 500 })
