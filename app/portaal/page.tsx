@@ -101,7 +101,7 @@ function CalendarSubscribeButton() {
         <p className="text-xs text-gray-500">Voeg al uw afspraken toe aan Apple Agenda, Google Agenda of Outlook. Wordt automatisch gesynchroniseerd.</p>
       </div>
       <div className="flex gap-2">
-        <a href={url} className="flex-1 px-3 py-2 bg-[#2176d4] text-white rounded-lg font-bold text-sm hover:bg-[#3080e0] transition-colors text-center">
+        <a href={url.replace(/^https?:\/\//,'webcal://')} className="flex-1 px-3 py-2 bg-[#2176d4] text-white rounded-lg font-bold text-sm hover:bg-[#3080e0] transition-colors text-center">
           Abonneren
         </a>
         <button onClick={kopieer} className={`px-3 py-2 rounded-lg font-bold text-sm border transition-colors ${gekopieerd?'border-green-700/50 text-green-400 bg-green-900/20':'border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444]'}`}>
