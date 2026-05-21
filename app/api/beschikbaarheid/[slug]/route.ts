@@ -25,10 +25,10 @@ export async function GET(
 
   const { data: settingsRows } = await supabaseAdmin
     .from('settings').select('key, value').eq('barber_id', barber.id)
-    .in('key', ['day_schedule', 'diensten', 'geblokkeerde_datums'])
+    .in('key', ['schema', 'diensten', 'geblokkeerde_datums'])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
-  const weekSchema: WeekSchedule = JSON.parse(map.day_schedule ?? '{}')
+  const weekSchema: WeekSchedule = JSON.parse(map.schema ?? '{}')
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
   const geblokkeerd: string[] = JSON.parse(map.geblokkeerde_datums ?? '[]')
   const dienst = diensten.find((d) => d.id === dienstId)

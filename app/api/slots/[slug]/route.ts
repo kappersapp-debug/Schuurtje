@@ -32,10 +32,10 @@ export async function GET(
     .from('settings')
     .select('key, value')
     .eq('barber_id', barber.id)
-    .in('key', ['day_schedule', 'diensten'])
+    .in('key', ['schema', 'diensten'])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
-  const weekSchema: WeekSchedule = JSON.parse(map.day_schedule ?? '{}')
+  const weekSchema: WeekSchedule = JSON.parse(map.schema ?? '{}')
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
   const dienst = diensten.find((d) => d.id === dienstId)
   if (!dienst) return Response.json({ error: 'Dienst niet gevonden' }, { status: 404 })

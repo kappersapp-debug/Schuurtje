@@ -338,11 +338,11 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
     loadDashboard()
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
       const s=d.instellingen??{}; const dow=String(new Date().getDay())
-      if(s.day_schedule){
-        const sched:Record<string,DayConfig>=JSON.parse(s.day_schedule); const cfg=sched[dow]
+      if(s.schema){
+        const sched:Record<string,DayConfig>=JSON.parse(s.schema as string); const cfg=sched[dow]
         setWorkSlots(cfg?.open?generateWorkSlots(cfg.start,cfg.end):[])
         setDayBreaks(cfg?.breaks??[])
-      } else setWorkSlots(generateWorkSlots(s.work_start??'09:00',s.work_end??'17:00'))
+      } else setWorkSlots(generateWorkSlots())
     })
     const id=setInterval(loadDashboard,60_000); return()=>clearInterval(id)
   },[loadDashboard])
@@ -466,8 +466,8 @@ function CalendarView() {
   useEffect(()=>{
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
       const s=d.instellingen??{}
-      if(s.day_schedule){
-        const parsed:Record<string,DayConfig>=JSON.parse(s.day_schedule)
+      if(s.schema){
+        const parsed:Record<string,DayConfig>=JSON.parse(s.schema as string)
         for(const k of Object.keys(parsed))parsed[k]={...parsed[k],breaks:parsed[k].breaks??[]}
         setSchedule(parsed)
       }
@@ -594,7 +594,7 @@ function DatePicker({value,onChange}:{value:string;onChange:(d:string)=>void}) {
 function AfspraakFormModal({initial,slug,onClose,onSaved}:{initial:AfspraakFormulierType;slug:string;onClose:()=>void;onSaved:()=>void}) {
   const[form,setForm]=useState<AfspraakFormulierType>(initial)
   const[diensten,setDiensten]=useState<{id:string;naam:string;prijs:number;duur:number}[]>([])
-  const[slots,setSlots]=useState<{time:string;available:boolean}[]>([])
+  const[slots,setSlots]=useState<string[]>([])
   const[loadingSlots,setLoadingSlots]=useState(false)
   const[saving,setSaving]=useState(false)
   const[error,setError]=useState('')
@@ -620,10 +620,10 @@ function AfspraakFormModal({initial,slug,onClose,onSaved}:{initial:AfspraakFormu
     setLoadingSlots(true)
     fetch(`/api/slots/${slug}?datum=${form.datum}&dienst=${form.dienstId}`)
       .then(r=>r.json()).then(d=>{
-        const fetched:{time:string;available:boolean}[]=d.slots??[]
-        if(isEdit&&initial.tijd&&!fetched.find(s=>s.time===initial.tijd))fetched.unshift({time:initial.tijd,available:true})
+        const fetched:string[]=d.slots??[]
+        if(isEdit&&initial.tijd&&!fetched.includes(initial.tijd))fetched.unshift(initial.tijd)
         setSlots(fetched)
-        if(!isEdit&&form.tijd&&!fetched.find(s=>s.time===form.tijd&&s.available))setForm(f=>({...f,tijd:''}))
+        if(!isEdit&&form.tijd&&!fetched.includes(form.tijd))setForm(f=>({...f,tijd:''}))
       }).finally(()=>setLoadingSlots(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[form.datum,form.dienstId])
@@ -644,8 +644,6 @@ function AfspraakFormModal({initial,slug,onClose,onSaved}:{initial:AfspraakFormu
       onSaved()
     }catch{setError('Netwerkfout')}finally{setSaving(false)}
   }
-
-  const availableSlots=slots.filter(s=>s.available)
 
   return(
     <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={onClose}>
@@ -680,9 +678,9 @@ function AfspraakFormModal({initial,slug,onClose,onSaved}:{initial:AfspraakFormu
           {form.datum&&(
             <div>
               <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Tijd *</label>
-              {loadingSlots?<div className="flex items-center gap-2 py-3 text-gray-500 text-sm"><div className="w-4 h-4 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>Tijdsloten laden...</div>:!form.dienstId?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Kies eerst een dienst</div>:availableSlots.length===0?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Geen beschikbare tijdsloten op deze dag</div>:(
+              {loadingSlots?<div className="flex items-center gap-2 py-3 text-gray-500 text-sm"><div className="w-4 h-4 border-2 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>Tijdsloten laden...</div>:!form.dienstId?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Kies eerst een dienst</div>:slots.length===0?<div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-gray-500 text-sm">Geen beschikbare tijdsloten op deze dag</div>:(
                 <div className="grid grid-cols-4 gap-2">
-                  {availableSlots.map(s=><button key={s.time} type="button" onClick={()=>setForm(f=>({...f,tijd:s.time}))} className={`py-2.5 rounded-xl text-sm font-bold transition-all ${form.tijd===s.time?'bg-[#2176d4] text-white shadow-[0_0_15px_rgba(33,118,212,0.3)]':'bg-[#0e0e0e] border border-[#2a2a2a] text-gray-400 hover:border-[#2176d4]/50 hover:text-white'}`}>{s.time}</button>)}
+                  {slots.map(s=><button key={s} type="button" onClick={()=>setForm(f=>({...f,tijd:s}))} className={`py-2.5 rounded-xl text-sm font-bold transition-all ${form.tijd===s?'bg-[#2176d4] text-white shadow-[0_0_15px_rgba(33,118,212,0.3)]':'bg-[#0e0e0e] border border-[#2a2a2a] text-gray-400 hover:border-[#2176d4]/50 hover:text-white'}`}>{s}</button>)}
                 </div>
               )}
             </div>
@@ -1030,7 +1028,8 @@ function WaitlistSection({slug}:{slug:string}){
       fetch('/api/instellingen').then(r=>r.json()),
     ]).then(([wd,sd])=>{
       setList(wd.wachtlijst??[])
-      setDiensten(sd.instellingen?.diensten??[])
+      const dienstenRaw=sd.instellingen?.diensten
+      setDiensten(dienstenRaw?JSON.parse(dienstenRaw):[])
       setLoading(false)
     })
   },[])
@@ -1258,8 +1257,8 @@ function SettingsView({session}:{session:Session}){
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
       const inst=d.instellingen??{}
       setInstellingen(inst)
-      if(inst.schema)setSchedule({...DEFAULT_SCHEDULE,...(inst.schema as Record<string,DayConfig>)})
-      if(inst.geblokkeerde_datums)setBlocked(inst.geblokkeerde_datums as string[])
+      if(inst.schema)setSchedule({...DEFAULT_SCHEDULE,...(JSON.parse(inst.schema as string) as Record<string,DayConfig>)})
+      if(inst.geblokkeerde_datums)setBlocked(JSON.parse(inst.geblokkeerde_datums as string) as string[])
       setLoading(false)
     })
   },[])

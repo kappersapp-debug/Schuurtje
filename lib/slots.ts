@@ -22,7 +22,7 @@ export function genereerSlots(
   dienst: Service,
   boekingen: Pick<Booking, 'tijd' | 'duur'>[],
 ): string[] {
-  const dag = new Date(datum).getDay()
+  const dag = new Date(datum + 'T12:00:00').getDay()
   const schema = weekSchema[String(dag)]
   if (!schema?.open) return []
 
