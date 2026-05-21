@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getKapperSession } from '@/lib/auth'
+import { randomUUID } from 'crypto'
 
 function fmt(d: Date) {
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}00`
@@ -12,19 +13,21 @@ function icsEsc(s: unknown) {
 }
 
 export async function GET(req: NextRequest) {
-  // Check if this is a subscribe request (has token param) or a URL-fetch from portal
   const token = req.nextUrl.searchParams.get('token')
 
   if (token) {
-    // Calendar client subscribe feed — validate against CRON_SECRET
-    if (token !== process.env.CRON_SECRET) {
-      return new Response('Unauthorized', { status: 401 })
-    }
+    // Calendar app fetches feed — look up barber by their calendar token
+    const { data: setting } = await supabaseAdmin
+      .from('settings')
+      .select('barber_id')
+      .eq('key', 'calendar_token')
+      .eq('value', token)
+      .single()
 
-    const slugParam = req.nextUrl.searchParams.get('slug')
-    if (!slugParam) return new Response('slug required', { status: 400 })
+    if (!setting) return new Response('Unauthorized', { status: 401 })
 
-    const { data: barber } = await supabaseAdmin.from('barbers').select('id, naam').eq('slug', slugParam).single()
+    const { data: barber } = await supabaseAdmin
+      .from('barbers').select('id, naam').eq('id', setting.barber_id).single()
     if (!barber) return new Response('Not found', { status: 404 })
 
     const { data: bookings } = await supabaseAdmin
@@ -60,7 +63,17 @@ export async function GET(req: NextRequest) {
       'END:VTIMEZONE',
     ].join('\r\n')
 
-    const ics = ['BEGIN:VCALENDAR','VERSION:2.0',`PRODID:-//${icsEsc(barber.naam)}//NL`,'METHOD:PUBLISH',`X-WR-CALNAME:${icsEsc(barber.naam)} Afspraken`,'X-WR-TIMEZONE:Europe/Amsterdam','REFRESH-INTERVAL;VALUE=DURATION:PT1M','X-PUBLISHED-TTL:PT1M', vtimezone, ...events, 'END:VCALENDAR'].join('\r\n')
+    const ics = [
+      'BEGIN:VCALENDAR','VERSION:2.0',
+      `PRODID:-//${icsEsc(barber.naam)}//NL`,
+      'METHOD:PUBLISH',
+      `X-WR-CALNAME:${icsEsc(barber.naam)} Afspraken`,
+      'X-WR-TIMEZONE:Europe/Amsterdam',
+      'REFRESH-INTERVAL;VALUE=DURATION:PT15M',
+      'X-PUBLISHED-TTL:PT15M',
+      vtimezone, ...events,
+      'END:VCALENDAR',
+    ].join('\r\n')
 
     return new Response(ics, {
       headers: {
@@ -71,11 +84,25 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // Portal: return the subscribe URL
+  // Portal: geef de subscribe-URL terug, maak token aan als die nog niet bestaat
   const session = await getKapperSession()
   if (!session) return Response.json({ error: 'Niet ingelogd' }, { status: 401 })
 
+  const { data: existing } = await supabaseAdmin
+    .from('settings').select('value')
+    .eq('barber_id', session.id).eq('key', 'calendar_token')
+    .single()
+
+  let calToken = existing?.value
+  if (!calToken) {
+    calToken = randomUUID()
+    await supabaseAdmin.from('settings').upsert(
+      { barber_id: session.id, key: 'calendar_token', value: calToken },
+      { onConflict: 'barber_id,key' }
+    )
+  }
+
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
-  const url = `${base}/api/portaal/calendar-url?token=${process.env.CRON_SECRET}&slug=${session.slug}`
+  const url = `${base}/api/portaal/calendar-url?token=${calToken}`
   return Response.json({ url })
 }
