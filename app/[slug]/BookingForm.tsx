@@ -161,7 +161,7 @@ function Progress({ step }: { step: number }) {
 /* ─── Main Component ─────────────────────────────────────── */
 type Review = { id: string; naam: string; rating: number; tekst: string | null; created_at: string }
 
-export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto, reviews = [] }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string; reviews?: Review[] }) {
+export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto, reviews = [], meestGeboektId = null }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string; reviews?: Review[]; meestGeboektId?: string | null }) {
   const [step, setStep]         = useState<number|'bevestiging'|'geblokkeerd'>(1)
   const [dienst, setDienst]     = useState<Service|null>(null)
   const [datum, setDatum]       = useState('')
@@ -689,8 +689,15 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                         className={['w-full flex items-center justify-between p-4 rounded-xl border transition-all text-left',
                           dienst?.id===s.id?'border-[#2176d4] bg-[#2176d4]/10':'border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#2176d4]/50 hover:bg-[#2176d4]/5',
                         ].join(' ')}>
-                        <div>
-                          <p className="font-bold text-white">{s.naam}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-white">{s.naam}</p>
+                            {meestGeboektId===s.id&&(
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-400 text-[10px] font-black uppercase tracking-wide">
+                                🔥 Populair
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-gray-500">{s.duur} minuten</p>
                         </div>
                         <p className="text-2xl font-black text-[#2176d4] ml-4">€{s.prijs}</p>
