@@ -22,6 +22,9 @@ export default function AdminNav() {
         <Link href="/admin/kappers" className="text-sm font-semibold text-gray-400 hover:text-white transition-colors">
           Kappers
         </Link>
+        <Link href="/admin/reviews" className="text-sm font-semibold text-gray-400 hover:text-white transition-colors">
+          Reviews
+        </Link>
         <button onClick={uitloggen}
           className="ml-auto text-xs font-bold text-gray-600 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-400/10">
           Uitloggen

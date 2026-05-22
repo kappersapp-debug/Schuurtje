@@ -36,6 +36,14 @@ export default async function KapperPage({
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
 
+  const { data: reviewRows } = await supabaseAdmin
+    .from('reviews')
+    .select('id, naam, rating, tekst, created_at')
+    .eq('barber_id', barber.id)
+    .order('created_at', { ascending: false })
+    .limit(10)
+  const reviews = (reviewRows ?? []) as { id: string; naam: string; rating: number; tekst: string | null; created_at: string }[]
+
   if (annuleerCode || verzetCode) {
     return (
       <AnnuleerVerzet
@@ -55,6 +63,7 @@ export default async function KapperPage({
       barberNaam={barber.naam}
       barberBio={barber.bio ?? undefined}
       barberFoto={barber.foto_url ?? undefined}
+      reviews={reviews}
     />
   )
 }

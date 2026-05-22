@@ -31,6 +31,7 @@ export async function stuurBevestiging(opts: {
 }) {
   const annuleerUrl = `${opts.baseUrl}/${opts.slug}?annuleer=${opts.code}`
   const verzetUrl   = `${opts.baseUrl}/${opts.slug}?verzet=${opts.code}`
+  const reviewUrl   = `${opts.baseUrl}/beoordeling?code=${opts.code}`
 
   await sendMail({
     to: opts.naar,
@@ -54,7 +55,11 @@ export async function stuurBevestiging(opts: {
             <a href="${verzetUrl}" style="display:block;background:#2176d4;color:#fff;font-weight:700;padding:13px 22px;border-radius:10px;text-decoration:none;font-size:15px;margin-bottom:10px;">Afspraak verzetten</a>
             <a href="${annuleerUrl}" style="display:block;background:#dc2626;color:#fff;font-weight:700;padding:13px 22px;border-radius:10px;text-decoration:none;font-size:15px;">Afspraak annuleren</a>
           </div>
-          <p style="color:#888;font-size:12px;text-align:center;">Of gebruik boekingscode <strong>${opts.code}</strong> op de website.</p>
+          <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:16px;text-align:center;margin-top:16px;">
+            <p style="margin:0 0 8px;font-size:13px;color:#78716c;">Na uw afspraak kunt u een beoordeling achterlaten:</p>
+            <a href="${reviewUrl}" style="color:#2176d4;font-weight:700;font-size:14px;text-decoration:none;">⭐ Beoordeling achterlaten</a>
+          </div>
+          <p style="color:#888;font-size:12px;text-align:center;margin-top:16px;">Of gebruik boekingscode <strong>${opts.code}</strong> op de website.</p>
         </div>
       </div>`,
   })

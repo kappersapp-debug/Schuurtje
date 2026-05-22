@@ -159,7 +159,9 @@ function Progress({ step }: { step: number }) {
 }
 
 /* ─── Main Component ─────────────────────────────────────── */
-export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string }) {
+type Review = { id: string; naam: string; rating: number; tekst: string | null; created_at: string }
+
+export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto, reviews = [] }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string; reviews?: Review[] }) {
   const [step, setStep]         = useState<number|'bevestiging'|'geblokkeerd'>(1)
   const [dienst, setDienst]     = useState<Service|null>(null)
   const [datum, setDatum]       = useState('')
@@ -955,6 +957,39 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
           </div>
         )}
       </div>
+
+      {/* Reviews */}
+      {reviews.length > 0 && (
+        <div className="max-w-lg mx-auto w-full px-4 mb-6">
+          <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div>
+                <p className="font-bold text-white text-sm">Beoordelingen</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-amber-400 text-sm tracking-tight">
+                    {'★'.repeat(Math.round(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length))}
+                    {'☆'.repeat(5-Math.round(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length))}
+                  </span>
+                  <span className="text-gray-500 text-xs">
+                    {(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length).toFixed(1)} · {reviews.length} {reviews.length===1?'beoordeling':'beoordelingen'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {reviews.slice(0,5).map(r=>(
+                <div key={r.id} className="border-t border-[#1e1e1e] pt-3 first:border-0 first:pt-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold text-white text-sm">{r.naam}</span>
+                    <span className="text-amber-400 text-xs">{'★'.repeat(r.rating)}{'☆'.repeat(5-r.rating)}</span>
+                  </div>
+                  {r.tekst && <p className="text-gray-500 text-xs leading-relaxed">{r.tekst}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="text-center text-gray-700 text-xs py-4" style={{paddingBottom:'max(2rem, env(safe-area-inset-bottom, 0px))'}}>
         © {new Date().getFullYear()} {barberNaam}
