@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 
-type Kapper = { id: string; naam: string; slug: string; bio: string | null; foto_url: string | null }
+type Kapper = { id: string; naam: string; slug: string; bio: string | null; foto_url: string | null; rating: number | null; aantalReviews: number }
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null
@@ -27,6 +27,15 @@ function Avatar({ k, size }: { k: Kapper; size: number }) {
         </div>
       )}
     </div>
+  )
+}
+
+function RatingBadge({ rating, aantal }: { rating: number; aantal: number }) {
+  return (
+    <span className="flex items-center gap-1 text-xs text-amber-400 font-bold shrink-0">
+      ★ {rating.toFixed(1)}
+      <span className="text-gray-600 font-normal">({aantal})</span>
+    </span>
   )
 }
 
@@ -83,7 +92,12 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
                 <Avatar k={recentKapper} size={46} />
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-white">{recentKapper.naam}</p>
-                  <p className="text-sm text-blue-200/70 truncate mt-0.5">{recentKapper.bio ?? 'Kapper'}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-sm text-blue-200/70 truncate">{recentKapper.bio ?? 'Kapper'}</p>
+                    {recentKapper.rating !== null && recentKapper.aantalReviews > 0 && (
+                      <span className="text-xs text-amber-300 font-bold shrink-0">★ {recentKapper.rating.toFixed(1)}</span>
+                    )}
+                  </div>
                 </div>
                 <span className="shrink-0 bg-white/15 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
                   Boek direct →
@@ -126,7 +140,12 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
                   <Avatar k={k} size={42} />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-white group-hover:text-[#2176d4] transition-colors">{k.naam}</p>
-                    {k.bio && <p className="text-xs text-gray-600 truncate mt-0.5">{k.bio}</p>}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {k.bio && <p className="text-xs text-gray-600 truncate">{k.bio}</p>}
+                      {k.rating !== null && k.aantalReviews > 0 && (
+                        <RatingBadge rating={k.rating} aantal={k.aantalReviews} />
+                      )}
+                    </div>
                   </div>
                   <svg className="w-4 h-4 text-gray-700 group-hover:text-[#2176d4] transition-colors shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>

@@ -25,6 +25,7 @@ export default function AdminReviewsPage() {
   const [laden, setLaden] = useState(true)
   const [verwijderConfirm, setVerwijderConfirm] = useState<string | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
+  const [filterKapper, setFilterKapper] = useState<string>('alle')
 
   async function laad() {
     setLaden(true)
@@ -48,38 +49,56 @@ export default function AdminReviewsPage() {
     laad()
   }
 
-  const gemiddelde = reviews.length
-    ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
+  const kappers = Array.from(new Set(reviews.map(r => r.barbers?.naam).filter(Boolean))) as string[]
+  const gefilterd = filterKapper === 'alle' ? reviews : reviews.filter(r => r.barbers?.naam === filterKapper)
+  const gemiddelde = gefilterd.length
+    ? (gefilterd.reduce((s, r) => s + r.rating, 0) / gefilterd.length).toFixed(1)
     : null
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Reviews</h1>
           <p className="text-gray-600 text-sm mt-0.5">
-            {reviews.length} beoordelingen
+            {gefilterd.length} beoordelingen
             {gemiddelde && <span className="ml-2 text-amber-400 font-bold">★ {gemiddelde}</span>}
           </p>
         </div>
       </div>
 
+      {/* Filter per kapper */}
+      {kappers.length > 1 && (
+        <div className="flex gap-2 flex-wrap mb-6">
+          <button onClick={() => setFilterKapper('alle')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all border ${filterKapper === 'alle' ? 'bg-[#2176d4] border-[#2176d4] text-white' : 'border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444]'}`}>
+            Alle kappers
+          </button>
+          {kappers.map(k => (
+            <button key={k} onClick={() => setFilterKapper(k)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all border ${filterKapper === k ? 'bg-[#2176d4] border-[#2176d4] text-white' : 'border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444]'}`}>
+              {k}
+            </button>
+          ))}
+        </div>
+      )}
+
       {laden ? (
         <div className="flex justify-center py-16">
           <div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>
         </div>
-      ) : reviews.length === 0 ? (
-        <div className="text-center py-16 text-gray-600">Nog geen beoordelingen.</div>
+      ) : gefilterd.length === 0 ? (
+        <div className="text-center py-16 text-gray-600">Geen beoordelingen{filterKapper !== 'alle' ? ` voor ${filterKapper}` : ''}.</div>
       ) : (
         <div className="space-y-3">
-          {reviews.map(r => (
+          {gefilterd.map(r => (
             <div key={r.id} className="bg-[#141414] rounded-2xl border border-[#222] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <span className="font-bold text-white">{r.naam}</span>
                     <Stars value={r.rating}/>
-                    {r.barbers && (
+                    {kappers.length > 1 && r.barbers && (
                       <span className="text-xs text-gray-600 font-mono">bij {r.barbers.naam}</span>
                     )}
                     <span className="text-xs text-gray-700">
