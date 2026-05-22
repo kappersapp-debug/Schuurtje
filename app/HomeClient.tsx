@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 
-type Kapper = { id: string; naam: string; slug: string; bio: string | null; foto_url: string | null; rating: number | null; aantalReviews: number }
+type EersteSlot = { dag: string; tijd: string } | null
+type Kapper = {
+  id: string; naam: string; slug: string; bio: string | null; foto_url: string | null
+  rating: number | null; aantalReviews: number; eersteSlot: EersteSlot
+}
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null
@@ -18,23 +22,22 @@ function setCookie(name: string, value: string) {
 
 function Avatar({ k, size }: { k: Kapper; size: number }) {
   return (
-    <div style={{ width: size, height: size }} className="rounded-full overflow-hidden flex-shrink-0 bg-[#222]">
-      {k.foto_url ? (
-        <Image src={k.foto_url} alt={k.naam} width={size} height={size} className="object-cover w-full h-full" />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center font-black text-gray-400" style={{ fontSize: size * 0.38 }}>
-          {k.naam[0].toUpperCase()}
-        </div>
-      )}
+    <div style={{ width: size, height: size }} className="rounded-full overflow-hidden flex-shrink-0 bg-[#1e1e1e] border-2 border-[#2a2a2a]">
+      {k.foto_url
+        ? <Image src={k.foto_url} alt={k.naam} width={size} height={size} className="object-cover w-full h-full" unoptimized />
+        : <div className="w-full h-full flex items-center justify-center font-black text-gray-500" style={{ fontSize: size * 0.38 }}>{k.naam[0].toUpperCase()}</div>
+      }
     </div>
   )
 }
 
-function RatingBadge({ rating, aantal }: { rating: number; aantal: number }) {
+function SlotBadge({ slot }: { slot: EersteSlot }) {
+  if (!slot) return <span className="text-xs text-gray-600">Momenteel niet beschikbaar</span>
+  const isVandaag = slot.dag === 'Vandaag'
   return (
-    <span className="flex items-center gap-1 text-xs text-amber-400 font-bold shrink-0">
-      ★ {rating.toFixed(1)}
-      <span className="text-gray-600 font-normal">({aantal})</span>
+    <span className={`inline-flex items-center gap-1 text-xs font-bold ${isVandaag ? 'text-green-400' : 'text-gray-400'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isVandaag ? 'bg-green-400' : 'bg-gray-600'}`}/>
+      {slot.dag} {slot.tijd}
     </span>
   )
 }
@@ -68,38 +71,42 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
       {/* Topbar */}
       <header className="border-b border-[#161616] px-6 h-14 flex items-center">
         <div className="max-w-2xl mx-auto w-full flex items-center gap-2">
-          <span className="text-[#2176d4]">✂</span>
+          <span className="text-[#2176d4] text-lg">✂</span>
           <span className="font-[family-name:var(--font-bebas)] tracking-widest text-white text-xl">Schuurtje</span>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4">
 
-        {/* Hero compact */}
+        {/* Hero */}
         <div className="py-10 border-b border-[#161616]">
           <h2 className="text-2xl font-bold text-white mb-1">Kies jouw kapper</h2>
-          <p className="text-gray-500 text-sm">Boek snel en eenvoudig een afspraak bij een van onze kappers.</p>
+          <p className="text-gray-500 text-sm">Online boeken zonder wachten. Direct beschikbaarheid zien.</p>
         </div>
 
-        <div className="py-6 space-y-6">
+        <div className="py-6 space-y-5">
 
           {/* Recente kapper */}
           {mounted && recentKapper && (
             <div>
               <p className="text-[11px] font-bold uppercase tracking-widest text-gray-600 mb-2.5">Welkom terug</p>
               <Link href={`/${recentKapper.slug}`} onClick={() => handleClick(recentKapper.slug)}
-                className="flex items-center gap-4 p-4 rounded-2xl bg-[#2176d4] hover:bg-[#2870c8] transition-colors group">
-                <Avatar k={recentKapper} size={46} />
+                className="flex items-center gap-4 p-4 rounded-2xl bg-[#2176d4] hover:bg-[#1d68be] transition-colors group">
+                <Avatar k={recentKapper} size={52} />
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-white">{recentKapper.naam}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <p className="text-sm text-blue-200/70 truncate">{recentKapper.bio ?? 'Kapper'}</p>
+                  <p className="font-bold text-white text-base">{recentKapper.naam}</p>
+                  <div className="flex items-center gap-2.5 mt-0.5 flex-wrap">
                     {recentKapper.rating !== null && recentKapper.aantalReviews > 0 && (
-                      <span className="text-xs text-amber-300 font-bold shrink-0">★ {recentKapper.rating.toFixed(1)}</span>
+                      <span className="text-amber-300 text-xs font-bold">★ {recentKapper.rating.toFixed(1)}</span>
+                    )}
+                    {recentKapper.eersteSlot && (
+                      <span className={`text-xs font-semibold ${recentKapper.eersteSlot.dag === 'Vandaag' ? 'text-green-300' : 'text-blue-200'}`}>
+                        {recentKapper.eersteSlot.dag} {recentKapper.eersteSlot.tijd}
+                      </span>
                     )}
                   </div>
                 </div>
-                <span className="shrink-0 bg-white/15 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+                <span className="shrink-0 bg-white/15 text-white text-xs font-bold px-3 py-1.5 rounded-lg whitespace-nowrap">
                   Boek direct →
                 </span>
               </Link>
@@ -128,24 +135,25 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-gray-600">Geen resultaten voor &ldquo;{search}&rdquo;</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {!search && (
-                <p className="text-[11px] font-bold uppercase tracking-widest text-gray-600 mb-3">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-gray-600 mb-1">
                   {kappers.length} {kappers.length === 1 ? 'kapper' : 'kappers'}
                 </p>
               )}
               {filtered.map(k => (
                 <Link key={k.id} href={`/${k.slug}`} onClick={() => handleClick(k.slug)}
-                  className="flex items-center gap-4 px-4 py-3.5 rounded-xl border border-[#1c1c1c] bg-[#111] hover:border-[#2a2a2a] hover:bg-[#161616] transition-all group">
-                  <Avatar k={k} size={42} />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-white group-hover:text-[#2176d4] transition-colors">{k.naam}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {k.bio && <p className="text-xs text-gray-600 truncate">{k.bio}</p>}
+                  className="flex items-center gap-4 px-4 py-4 rounded-2xl border border-[#1c1c1c] bg-[#111] hover:border-[#2a2a2a] hover:bg-[#141414] transition-all group">
+                  <Avatar k={k} size={56} />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-bold text-white text-base group-hover:text-[#2176d4] transition-colors">{k.naam}</p>
                       {k.rating !== null && k.aantalReviews > 0 && (
-                        <RatingBadge rating={k.rating} aantal={k.aantalReviews} />
+                        <span className="text-amber-400 text-xs font-bold">★ {k.rating.toFixed(1)} <span className="text-gray-600 font-normal">({k.aantalReviews})</span></span>
                       )}
                     </div>
+                    {k.bio && <p className="text-xs text-gray-600 truncate">{k.bio}</p>}
+                    <SlotBadge slot={k.eersteSlot} />
                   </div>
                   <svg className="w-4 h-4 text-gray-700 group-hover:text-[#2176d4] transition-colors shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
