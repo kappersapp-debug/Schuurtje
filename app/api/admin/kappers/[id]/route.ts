@@ -17,8 +17,10 @@ export async function PATCH(
   if (!body) return Response.json({ error: 'Ongeldig verzoek' }, { status: 400 })
 
   const update: Record<string, unknown> = {}
-  if (body.naam) update.naam = body.naam.trim()
-  if (body.bio !== undefined) update.bio = body.bio
+  if (body.naam?.trim()) update.naam = body.naam.trim()
+  if (body.slug?.trim()) update.slug = body.slug.trim().toLowerCase()
+  if (body.email?.trim()) update.email = body.email.trim().toLowerCase()
+  if (body.bio !== undefined) update.bio = body.bio?.trim() || null
   if (typeof body.actief === 'boolean') update.actief = body.actief
   if (body.wachtwoord) update.password_hash = await hash(body.wachtwoord, 12)
 

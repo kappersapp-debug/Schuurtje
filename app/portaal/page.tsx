@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import Image from 'next/image'
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface Afspraak {
@@ -1329,6 +1330,16 @@ function SettingsView({session}:{session:Session}){
   const[errs,setErrs]=useState<Record<string,string>>({})
   const[saving,setSaving]=useState<Record<string,boolean>>({})
 
+  // Profiel
+  const[profielNaam,setProfielNaam]=useState(session.naam)
+  const[profielBio,setProfielBio]=useState('')
+  const[profielFoto,setProfielFoto]=useState<string|null>(null)
+  const[profielMsg,setProfielMsg]=useState('')
+  const[profielErr,setProfielErr]=useState('')
+  const[profielSaving,setProfielSaving]=useState(false)
+  const[fotoLoading,setFotoLoading]=useState(false)
+  const fotoRef=useRef<HTMLInputElement>(null)
+
   useEffect(()=>{
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
       const s=d.instellingen??{}
@@ -1339,6 +1350,9 @@ function SettingsView({session}:{session:Session}){
       }
       if(s.geblokkeerde_datums)setBlockedDates(JSON.parse(s.geblokkeerde_datums as string) as string[])
     })
+    fetch('/api/portaal/profiel').then(r=>r.json()).then(d=>{
+      if(d.profiel){setProfielNaam(d.profiel.naam??session.naam);setProfielBio(d.profiel.bio??'');setProfielFoto(d.profiel.foto_url??null)}
+    })
   },[])
 
   async function save(key:string,value:string,section:string){
@@ -1347,6 +1361,26 @@ function SettingsView({session}:{session:Session}){
     await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})})
     setSaving(s=>({...s,[section]:false}));setMsgs(m=>({...m,[section]:'Opgeslagen'}))
     setTimeout(()=>setMsgs(m=>({...m,[section]:''})),3000)
+  }
+
+  async function slaProfielOp(e:React.FormEvent){
+    e.preventDefault();setProfielErr('');setProfielMsg('')
+    if(!profielNaam.trim()){setProfielErr('Naam mag niet leeg zijn');return}
+    setProfielSaving(true)
+    const res=await fetch('/api/portaal/profiel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({naam:profielNaam,bio:profielBio})})
+    setProfielSaving(false)
+    if(res.ok){setProfielMsg('Opgeslagen');setTimeout(()=>setProfielMsg(''),3000)}
+    else setProfielErr('Opslaan mislukt')
+  }
+
+  async function uploadProfielFoto(file:File){
+    setFotoLoading(true);setProfielErr('')
+    const fd=new FormData();fd.append('foto',file)
+    const res=await fetch('/api/portaal/profiel/foto',{method:'POST',body:fd})
+    const d=await res.json()
+    setFotoLoading(false)
+    if(res.ok)setProfielFoto(d.foto_url)
+    else setProfielErr(d.error??'Upload mislukt')
   }
 
   async function changePw(e:React.FormEvent){
@@ -1387,6 +1421,50 @@ function SettingsView({session}:{session:Session}){
   return(
     <div className="max-w-2xl space-y-6">
       <h1 className="text-3xl font-[family-name:var(--font-bebas)] tracking-widest text-white">Instellingen</h1>
+
+      {/* Profiel */}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-1">Profiel</h2>
+        <p className="text-xs text-gray-500 mb-4">Naam, bio en profielfoto die klanten zien</p>
+        <form onSubmit={slaProfielOp} className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="w-16 h-16 rounded-full overflow-hidden bg-[#1e1e1e] border border-[#2a2a2a] flex items-center justify-center shrink-0">
+                {profielFoto
+                  ?<Image src={`${profielFoto}?t=${Date.now()}`} alt="" width={64} height={64} className="object-cover w-full h-full" unoptimized/>
+                  :<span className="text-2xl font-black text-gray-500">{session.naam[0].toUpperCase()}</span>
+                }
+              </div>
+              {fotoLoading&&<div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/></div>}
+            </div>
+            <div>
+              <input ref={fotoRef} type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)uploadProfielFoto(f)}}/>
+              <button type="button" onClick={()=>fotoRef.current?.click()} disabled={fotoLoading}
+                className="text-xs px-3 py-1.5 rounded-lg font-bold border border-[#2a2a2a] text-gray-400 hover:text-white hover:border-[#444] transition-all disabled:opacity-50">
+                {fotoLoading?'Uploaden...':'Foto wijzigen'}
+              </button>
+              <p className="text-[10px] text-gray-700 mt-1">Max 5MB · JPG, PNG, WebP</p>
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Naam</label>
+              <input value={profielNaam} onChange={e=>setProfielNaam(e.target.value)} required
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Bio</label>
+              <input value={profielBio} onChange={e=>setProfielBio(e.target.value)} placeholder="Korte beschrijving..."
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+            </div>
+          </div>
+          {profielErr&&<p className="text-sm text-red-400 font-semibold">{profielErr}</p>}
+          {profielMsg&&<p className="text-sm text-green-400 font-semibold">{profielMsg}</p>}
+          <button type="submit" disabled={profielSaving} className="px-4 py-2 rounded-xl bg-[#2176d4] text-white text-sm font-bold hover:bg-[#3080e0] disabled:opacity-50 transition-all">
+            {profielSaving?'Opslaan...':'Opslaan'}
+          </button>
+        </form>
+      </div>
 
       {/* Beschikbaarheid & Werktijden */}
       <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">

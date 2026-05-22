@@ -11,7 +11,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from('barbers')
-    .select('id, naam, slug, email, actief, created_at')
+    .select('id, naam, slug, email, bio, foto_url, actief, created_at')
     .order('naam')
 
   if (error) return Response.json({ error: 'DB fout' }, { status: 500 })

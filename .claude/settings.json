@@ -3,7 +3,18 @@
     "allow": [
       "Read(//c/Mosaidcuts/**)",
       "Bash(dir C:\\\\Mosaidcuts /b)",
-      "Read(//c/Users/icigi/.claude/projects/c--mosaidcuts/memory/**)"
+      "Read(//c/Users/icigi/.claude/projects/c--mosaidcuts/memory/**)",
+      "Bash(Get-ChildItem -Path . -Recurse -Directory -Force)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(git diff *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Mosaidcuts\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)",
+      "Bash(dir \"c:\\\\schuurtje\\\\app\" /b)",
+      "Read(//c/schuurtje/app/**)",
+      "Read(//c/Mosaidcuts/app/**)",
+      "Bash(Get-ChildItem -Recurse c:\\\\schuurtje\\\\app\\\\api -Filter \"*.ts\")",
+      "Bash(xargs basename -a)"
     ]
   }
 }
