@@ -147,6 +147,14 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
   const lastCheckedRef=useRef('')
   const notifBtnRef=useRef<HTMLButtonElement>(null)
   const[panelStyle,setPanelStyle]=useState<React.CSSProperties>({top:56,right:16})
+  const[liveNaam,setLiveNaam]=useState(session.naam)
+  const[liveFoto,setLiveFoto]=useState<string|null>(null)
+
+  useEffect(()=>{
+    fetch('/api/portaal/profiel').then(r=>r.json()).then(d=>{
+      if(d.profiel){setLiveNaam(d.profiel.naam??session.naam);setLiveFoto(d.profiel.foto_url??null)}
+    }).catch(()=>{})
+  },[])
 
   useEffect(()=>{
     const stored=localStorage.getItem('sch_notif_last_checked')
@@ -228,11 +236,14 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
       )}
       <aside className="hidden lg:flex flex-col w-60 bg-[#0e0e0e] min-h-screen fixed left-0 top-0 z-30 border-r border-[#1e1e1e]">
         <div className="px-6 py-5 border-b border-[#1e1e1e] flex items-center gap-3">
-          <div className="w-11 h-11 rounded-full bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center shrink-0">
-            <svg className="w-5 h-5 text-[#2176d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          <div className="w-11 h-11 rounded-full overflow-hidden bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center shrink-0">
+            {liveFoto
+              ?<Image src={liveFoto} alt={liveNaam} width={44} height={44} className="object-cover w-full h-full" unoptimized/>
+              :<span className="font-bold text-[#2176d4] text-base">{liveNaam[0].toUpperCase()}</span>
+            }
           </div>
           <div>
-            <div className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-lg leading-none">{session.naam}</div>
+            <div className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-lg leading-none">{liveNaam}</div>
             <p className="text-gray-600 text-[10px] mt-0.5 tracking-wider uppercase">Kapper Portaal</p>
           </div>
         </div>
@@ -260,10 +271,13 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
       </aside>
       <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-[#0e0e0e] px-4 h-14 flex items-center justify-between border-b border-[#1e1e1e]">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center">
-            <svg className="w-4 h-4 text-[#2176d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+          <div className="w-8 h-8 rounded-full overflow-hidden bg-[#2176d4]/15 border border-[#2176d4]/30 flex items-center justify-center shrink-0">
+            {liveFoto
+              ?<Image src={liveFoto} alt={liveNaam} width={32} height={32} className="object-cover w-full h-full" unoptimized/>
+              :<span className="font-bold text-[#2176d4] text-xs">{liveNaam[0].toUpperCase()}</span>
+            }
           </div>
-          <span className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-base">{session.naam}</span>
+          <span className="text-white font-[family-name:var(--font-bebas)] tracking-widest text-base">{liveNaam}</span>
         </div>
         <button onClick={openNotifMobile} className="relative w-9 h-9 flex items-center justify-center text-gray-400 hover:text-white transition-colors">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
@@ -311,7 +325,7 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
           {view==='customers'&&<CustomersView/>}
           {view==='services'&&<ServicesView/>}
           {view==='management'&&<ManagementView session={session}/>}
-          {view==='settings'&&<SettingsView session={session}/>}
+          {view==='settings'&&<SettingsView session={session} onProfielUpdate={(naam,foto)=>{setLiveNaam(naam);if(foto!==undefined)setLiveFoto(foto)}}/>}
         </div>
       </main>
     </div>
@@ -1322,7 +1336,7 @@ function ManagementView({session}:{session:Session}){
 }
 
 /* ─── SettingsView ───────────────────────────────────────── */
-function SettingsView({session}:{session:Session}){
+function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate?:(naam:string,foto:string|null)=>void}){
   const[daySchedule,setDaySchedule]=useState<Record<string,DayConfig>>(DEFAULT_SCHEDULE)
   const[blockedDates,setBlockedDates]=useState<string[]>([])
   const[currentPw,setCurrentPw]=useState('');const[newPw,setNewPw]=useState('');const[confirmPw,setConfirmPw]=useState('')
@@ -1369,7 +1383,7 @@ function SettingsView({session}:{session:Session}){
     setProfielSaving(true)
     const res=await fetch('/api/portaal/profiel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({naam:profielNaam,bio:profielBio})})
     setProfielSaving(false)
-    if(res.ok){setProfielMsg('Opgeslagen');setTimeout(()=>setProfielMsg(''),3000)}
+    if(res.ok){setProfielMsg('Opgeslagen');onProfielUpdate?.(profielNaam,profielFoto);setTimeout(()=>setProfielMsg(''),3000)}
     else setProfielErr('Opslaan mislukt')
   }
 
@@ -1379,7 +1393,7 @@ function SettingsView({session}:{session:Session}){
     const res=await fetch('/api/portaal/profiel/foto',{method:'POST',body:fd})
     const d=await res.json()
     setFotoLoading(false)
-    if(res.ok)setProfielFoto(d.foto_url)
+    if(res.ok){setProfielFoto(d.foto_url);onProfielUpdate?.(profielNaam,d.foto_url)}
     else setProfielErr(d.error??'Upload mislukt')
   }
 
