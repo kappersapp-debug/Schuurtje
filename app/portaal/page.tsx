@@ -13,7 +13,8 @@ interface WachtlijstEntry { id: string; naam: string; telefoon: string; email: s
 interface GebandEmail { id: string; email: string; reden: string; created_at: string }
 interface Klant { email: string; naam: string; bezoeken: number; totaalBesteed: number; lastDate: string; lastService: string; afspraken: {code:string;service:string;prijs:number;datum:string;tijd:string}[] }
 interface Session { id: string; naam: string; slug: string; email: string; exp: number }
-interface Stats { vandaag: number; week: number; weekOmzet: number; totaalKlanten: number; maandKlanten: number; vandaagAfspraken: Afspraak[] }
+interface DagOmzet { datum: string; omzet: number; label: string }
+interface Stats { vandaag: number; week: number; weekOmzet: number; totaalKlanten: number; maandKlanten: number; vandaagAfspraken: Afspraak[]; dagOmzet: DagOmzet[] }
 type BreakSlot = { start: string; end: string }
 type DayConfig = { open: boolean; start: string; end: string; breaks: BreakSlot[] }
 const DEFAULT_SCHEDULE: Record<string, DayConfig> = {
@@ -129,6 +130,7 @@ function LoginScreen({onLogin}:{onLogin:()=>void}) {
             </div>
           </div>
           <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-[#2176d4] text-white font-bold hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">{loading?'Bezig...':'Inloggen'}</button>
+          <a href="/wachtwoord-vergeten" className="block text-center text-xs text-gray-600 hover:text-gray-400 transition-colors mt-3">Wachtwoord vergeten?</a>
         </form>
       </div>
     </div>
@@ -229,7 +231,7 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
         </div>
       )}
       {toast&&(
-        <div className="fixed top-16 right-4 lg:top-4 lg:right-6 z-50 bg-[#2176d4] text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-xs">
+        <div className="fixed bottom-4 right-4 z-50 bg-[#2176d4] text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 max-w-xs animate-fade-up">
           <div className="flex-1 min-w-0"><p className="font-bold text-sm">Nieuwe melding</p><p className="text-xs text-white/70 truncate">{toast}</p></div>
           <button onClick={()=>setToast(null)} className="text-white/50 hover:text-white shrink-0 leading-none text-lg">×</button>
         </div>
@@ -343,6 +345,10 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
   const[waitlistCount,setWaitlistCount]=useState<number|null>(null)
   const[lastUpdated,setLastUpdated]=useState('')
   const[recentReviews,setRecentReviews]=useState<DashboardReview[]>([])
+  const[reviewReplies,setReviewReplies]=useState<Record<string,string>>({})
+  const[replyEdit,setReplyEdit]=useState<string|null>(null)
+  const[replyText,setReplyText]=useState('')
+  const[replySaving,setReplySaving]=useState(false)
 
   const loadDashboard=useCallback(()=>{
     fetch('/api/portaal/stats').then(r=>r.json()).then(d=>setStats(d))
@@ -357,7 +363,7 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
       setUpcoming(filtered.slice(0,8))
     })
     fetch('/api/wachtlijst').then(r=>r.json()).then(d=>setWaitlistCount((d.wachtlijst??[]).length))
-    fetch('/api/portaal/reviews').then(r=>r.json()).then(d=>setRecentReviews(d.reviews??[])).catch(()=>{})
+    fetch('/api/portaal/reviews').then(r=>r.json()).then(d=>{setRecentReviews(d.reviews??[]);setReviewReplies(d.replies??{})}).catch(()=>{})
     setLastUpdated(new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'}))
   },[])
 
@@ -414,24 +420,53 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
           )}
         </div>
       )}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-        {[
-          {label:'Vandaag',value:stats?.vandaag??'—',sub:'afspraken',gold:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>},
-          {label:'Week omzet',value:stats?.weekOmzet!=null?`€${stats.weekOmzet}`:'—',sub:`${stats?.week??0} afspraken`,gold:false,green:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>},
-          {label:'Deze maand',value:stats?.maandKlanten??'—',sub:'klanten',gold:false,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>},
-          {label:'Wachtlijst',value:waitlistCount??'—',sub:'openstaand',gold:false,amber:(waitlistCount??0)>0,onClick:()=>onNavigate('management'),icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25H12M3 3.375C3 2.339 3.84 1.5 4.875 1.5H7.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125H4.875A1.875 1.875 0 013 6.375V3.375z"/></svg>},
-        ].map((c,i)=>(
-          <div key={c.label} style={{animationDelay:`${i*60}ms`}} onClick={(c as {onClick?:()=>void}).onClick}
-            className={`animate-fade-up rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${(c as {onClick?:()=>void}).onClick?'cursor-pointer':''} ${c.gold?'bg-gradient-to-br from-[#2176d4]/15 to-[#2176d4]/5 border-[#2176d4]/25 hover:shadow-[#2176d4]/10':(c as {green?:boolean}).green?'bg-green-900/15 border-green-800/30 hover:shadow-green-900/20':(c as {amber?:boolean}).amber?'bg-amber-900/15 border-amber-800/30 hover:shadow-amber-900/20':'bg-[#141414] border-[#222] hover:border-[#2a2a2a] hover:shadow-black/40'}`}>
-            <div className="flex items-start justify-between mb-3">
-              <p className={`text-[11px] font-bold uppercase tracking-widest ${c.gold?'text-[#2176d4]/60':(c as {green?:boolean}).green?'text-green-500/70':(c as {amber?:boolean}).amber?'text-amber-500/70':'text-gray-600'}`}>{c.label}</p>
-              <span className={c.gold?'text-[#2176d4]/40':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-700'}>{c.icon}</span>
+      {stats===null?(
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+          {[0,1,2,3].map(i=><div key={i} className="skeleton h-28 rounded-2xl"/>)}
+        </div>
+      ):(
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+          {[
+            {label:'Vandaag',value:stats.vandaag,sub:'afspraken',gold:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>},
+            {label:'Week omzet',value:`€${stats.weekOmzet}`,sub:`${stats.week} afspraken`,gold:false,green:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>},
+            {label:'Deze maand',value:stats.maandKlanten,sub:'klanten',gold:false,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>},
+            {label:'Wachtlijst',value:waitlistCount??'—',sub:'openstaand',gold:false,amber:(waitlistCount??0)>0,onClick:()=>onNavigate('management'),icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25H12M3 3.375C3 2.339 3.84 1.5 4.875 1.5H7.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125H4.875A1.875 1.875 0 013 6.375V3.375z"/></svg>},
+          ].map((c,i)=>(
+            <div key={c.label} style={{animationDelay:`${i*60}ms`}} onClick={(c as {onClick?:()=>void}).onClick}
+              className={`animate-fade-up rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${(c as {onClick?:()=>void}).onClick?'cursor-pointer':''} ${c.gold?'bg-gradient-to-br from-[#2176d4]/15 to-[#2176d4]/5 border-[#2176d4]/25 hover:shadow-[#2176d4]/10':(c as {green?:boolean}).green?'bg-green-900/15 border-green-800/30 hover:shadow-green-900/20':(c as {amber?:boolean}).amber?'bg-amber-900/15 border-amber-800/30 hover:shadow-amber-900/20':'bg-[#141414] border-[#222] hover:border-[#2a2a2a] hover:shadow-black/40'}`}>
+              <div className="flex items-start justify-between mb-3">
+                <p className={`text-[11px] font-bold uppercase tracking-widest ${c.gold?'text-[#2176d4]/60':(c as {green?:boolean}).green?'text-green-500/70':(c as {amber?:boolean}).amber?'text-amber-500/70':'text-gray-600'}`}>{c.label}</p>
+                <span className={c.gold?'text-[#2176d4]/40':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-700'}>{c.icon}</span>
+              </div>
+              <p className={`text-4xl font-black leading-none ${c.gold?'text-[#2176d4]':(c as {green?:boolean}).green?'text-green-400':(c as {amber?:boolean}).amber?'text-amber-400':'text-white'}`}><AnimatedNumber value={c.value as number|string}/></p>
+              <p className={`text-xs mt-2 ${c.gold?'text-[#2176d4]/50':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-600'}`}>{c.sub}</p>
             </div>
-            <p className={`text-4xl font-black leading-none ${c.gold?'text-[#2176d4]':(c as {green?:boolean}).green?'text-green-400':(c as {amber?:boolean}).amber?'text-amber-400':'text-white'}`}><AnimatedNumber value={c.value as number|string}/></p>
-            <p className={`text-xs mt-2 ${c.gold?'text-[#2176d4]/50':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-600'}`}>{c.sub}</p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+      {stats?.dagOmzet&&stats.dagOmzet.some(d=>d.omzet>0)&&(
+        <div className="bg-[#141414] rounded-2xl border border-[#222] p-5 mb-6">
+          <h2 className="font-bold text-white text-sm mb-1">Omzet laatste 7 dagen</h2>
+          <p className="text-xs text-gray-600 mb-4">€{stats.dagOmzet.reduce((s,d)=>s+d.omzet,0)} totaal</p>
+          {(()=>{const max=Math.max(...stats.dagOmzet.map(d=>d.omzet),1);const todayStr=new Date().toLocaleDateString('sv-SE');return(
+            <div className="flex items-end gap-1.5 h-20">
+              {stats.dagOmzet.map(d=>{
+                const pct=d.omzet/max*100;const isToday=d.datum===todayStr
+                return(
+                  <div key={d.datum} className="flex-1 flex flex-col items-center gap-1 justify-end h-full">
+                    <div className="w-full flex flex-col justify-end" style={{height:'60px'}}>
+                      {d.omzet>0&&<span className="text-[8px] text-center text-gray-500 mb-0.5">€{d.omzet}</span>}
+                      <div title={`${d.label}: €${d.omzet}`} className={`w-full rounded-t transition-all ${isToday?'bg-[#2176d4]':'bg-[#2a2a2a] hover:bg-[#333]'}`}
+                        style={{height:`${d.omzet>0?Math.max(pct,8):2}%`}}/>
+                    </div>
+                    <span className={`text-[9px] font-medium ${isToday?'text-[#2176d4]':'text-gray-600'}`}>{d.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )})()}
+        </div>
+      )}
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
           <div className="px-5 py-4 border-b border-[#1a1a1a] flex items-center justify-between">
@@ -491,16 +526,54 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
             </div>
           </div>
           <div className="divide-y divide-[#1a1a1a]">
-            {recentReviews.slice(0,3).map(r=>(
-              <div key={r.id} className="px-5 py-3.5 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-xl bg-amber-400/10 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-black text-amber-400">{r.rating}★</span>
+            {recentReviews.slice(0,5).map(r=>(
+              <div key={r.id} className="px-5 py-3.5">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-amber-400/10 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-black text-amber-400">{r.rating}★</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-white text-sm">{r.naam}</p>
+                    {r.tekst&&<p className="text-xs text-gray-500 mt-0.5">{r.tekst}</p>}
+                    {reviewReplies[r.id]&&replyEdit!==r.id&&(
+                      <div className="mt-1.5 flex items-start gap-1.5">
+                        <span className="text-[#2176d4] text-xs shrink-0">↳</span>
+                        <p className="text-xs text-[#2176d4]/80 italic">{reviewReplies[r.id]}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <p className="text-[10px] text-gray-700">{new Date(r.created_at).toLocaleDateString('nl-NL',{day:'numeric',month:'short'})}</p>
+                    <button onClick={()=>{setReplyEdit(r.id);setReplyText(reviewReplies[r.id]??'')}}
+                      className="text-[10px] text-gray-600 hover:text-[#2176d4] transition-colors font-bold">
+                      {reviewReplies[r.id]?'Bewerk':'Reageer'}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-white text-sm">{r.naam}</p>
-                  {r.tekst&&<p className="text-xs text-gray-500 truncate mt-0.5">{r.tekst}</p>}
-                </div>
-                <p className="text-[10px] text-gray-700 shrink-0">{new Date(r.created_at).toLocaleDateString('nl-NL',{day:'numeric',month:'short'})}</p>
+                {replyEdit===r.id&&(
+                  <div className="mt-2 space-y-2 pl-11">
+                    <textarea value={replyText} onChange={e=>setReplyText(e.target.value)} rows={2} autoFocus
+                      placeholder="Schrijf een reactie..."
+                      className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#2176d4] resize-none"/>
+                    <div className="flex gap-2">
+                      <button disabled={replySaving} onClick={async()=>{
+                        setReplySaving(true)
+                        await fetch('/api/portaal/reviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:r.id,reply:replyText})})
+                        setReviewReplies(prev=>replyText.trim()?{...prev,[r.id]:replyText.trim()}:(()=>{const n={...prev};delete n[r.id];return n})())
+                        setReplyEdit(null);setReplySaving(false)
+                      }} className="px-3 py-1 bg-[#2176d4] text-white text-xs font-bold rounded-lg disabled:opacity-50 hover:bg-[#3080e0] transition-colors">
+                        {replySaving?'...':'Opslaan'}
+                      </button>
+                      {reviewReplies[r.id]&&<button onClick={async()=>{
+                        setReplySaving(true)
+                        await fetch('/api/portaal/reviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review_id:r.id,reply:''})})
+                        setReviewReplies(prev=>{const n={...prev};delete n[r.id];return n})
+                        setReplyEdit(null);setReplySaving(false)
+                      }} className="px-3 py-1 text-red-400 text-xs font-bold rounded-lg hover:bg-red-900/20 transition-colors">Verwijder</button>}
+                      <button onClick={()=>setReplyEdit(null)} className="px-3 py-1 text-gray-500 text-xs font-bold hover:text-gray-300 transition-colors">Annuleer</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -763,15 +836,23 @@ function AppointmentsView({session}:{session:Session}) {
   const[search,setSearch]=useState('')
   const[bookings,setBookings]=useState<Afspraak[]>([])
   const[loading,setLoading]=useState(false)
+  const[heeftMeer,setHeeftMeer]=useState(false)
+  const[loadingMeer,setLoadingMeer]=useState(false)
   const[deleting,setDeleting]=useState<string|null>(null)
   const[noShowLoading,setNoShowLoading]=useState<string|null>(null)
   const[formBooking,setFormBooking]=useState<AfspraakFormulierType|null>(null)
   const[confirmDel,setConfirmDel]=useState<string|null>(null)
+  const pastOffsetRef=useRef(0)
 
   const load=useCallback(async()=>{
-    setLoading(true)
-    try{const r=await fetch(`/api/afspraken?filter=${filter}&search=${encodeURIComponent(search)}`);const d=await r.json();setBookings(d.afspraken??[])}finally{setLoading(false)}
+    setLoading(true);setHeeftMeer(false);pastOffsetRef.current=0
+    try{const r=await fetch(`/api/afspraken?filter=${filter}&search=${encodeURIComponent(search)}&offset=0`);const d=await r.json();setBookings(d.afspraken??[]);setHeeftMeer(d.heeftMeer??false);pastOffsetRef.current=(d.afspraken??[]).length}finally{setLoading(false)}
   },[filter,search])
+
+  async function laadMeer(){
+    setLoadingMeer(true)
+    try{const r=await fetch(`/api/afspraken?filter=${filter}&search=${encodeURIComponent(search)}&offset=${pastOffsetRef.current}`);const d=await r.json();setBookings(prev=>[...prev,...(d.afspraken??[])]);setHeeftMeer(d.heeftMeer??false);pastOffsetRef.current+=(d.afspraken??[]).length}finally{setLoadingMeer(false)}
+  }
 
   useEffect(()=>{load();const id=setInterval(load,60_000);return()=>clearInterval(id)},[load])
 
@@ -810,7 +891,13 @@ function AppointmentsView({session}:{session:Session}) {
           {filters.map(f=><button key={f.id} onClick={()=>setFilter(f.id)} className={['flex-1 min-w-fit px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',filter===f.id?'bg-[#2176d4] text-white shadow-sm':'text-gray-500 hover:text-gray-300'].join(' ')}>{f.label}</button>)}
         </div>
       </div>
-      {loading?<div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/></div>:bookings.length===0?<div className="text-center py-12 text-gray-500 font-medium">Geen afspraken gevonden</div>:(
+      {loading?(<div className="space-y-3">{[0,1,2,3].map(i=><div key={i} className="skeleton h-24 rounded-2xl"/>)}</div>):bookings.length===0?<div className="text-center py-12 text-gray-500 font-medium">Geen afspraken gevonden</div>:(
+        <div>
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-[#0e0e0e] rounded-xl border border-[#1e1e1e] mb-3 text-xs">
+          <span className="font-bold text-gray-500">{bookings.length} afspraak{bookings.length===1?'':'en'}</span>
+          <span className="text-gray-700">·</span>
+          <span className="font-bold text-green-400">€{bookings.reduce((s,b)=>s+b.prijs,0)} totaal</span>
+        </div>
         <div className="space-y-3">
           {bookings.map(b=>{
             const status=getStatus(b.datum)
@@ -850,6 +937,13 @@ function AppointmentsView({session}:{session:Session}) {
             )
           })}
         </div>
+        {filter==='past'&&heeftMeer&&(
+          <button onClick={laadMeer} disabled={loadingMeer}
+            className="mt-4 w-full py-3 border border-[#2a2a2a] text-gray-400 rounded-xl text-sm font-bold hover:border-[#333] hover:text-white disabled:opacity-50 transition-all">
+            {loadingMeer?'Laden...':'Meer laden'}
+          </button>
+        )}
+        </div>
       )}
     </div>
   )
@@ -861,7 +955,20 @@ function CustomersView() {
   const[loading,setLoading]=useState(true)
   const[search,setSearch]=useState('')
   const[expanded,setExpanded]=useState<string|null>(null)
-  useEffect(()=>{fetch('/api/klanten').then(r=>r.json()).then(d=>{setKlanten(d.klanten??[]);setLoading(false)})},[])
+  const[notities,setNotities]=useState<Record<string,string>>({})
+  const[notitieEdit,setNotitieEdit]=useState<string|null>(null)
+  const[notitieText,setNotitieText]=useState('')
+  const[notitieLoading,setNotitieLoading]=useState(false)
+  useEffect(()=>{
+    fetch('/api/klanten').then(r=>r.json()).then(d=>{setKlanten(d.klanten??[]);setLoading(false)})
+    fetch('/api/instellingen').then(r=>r.json()).then(d=>{const s=d.instellingen??{};if(s.klant_notities)setNotities(JSON.parse(s.klant_notities as string))})
+  },[])
+  async function saveNotitie(email:string,text:string){
+    setNotitieLoading(true)
+    const updated={...notities,[email]:text};if(!text.trim())delete updated[email]
+    await fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'klant_notities',value:JSON.stringify(updated)})})
+    setNotities(updated);setNotitieEdit(null);setNotitieLoading(false)
+  }
   const filtered=klanten.filter(c=>c.email.includes(search.toLowerCase())||c.naam.toLowerCase().includes(search.toLowerCase()))
   return(
     <div className="animate-fade-up">
@@ -905,6 +1012,30 @@ function CustomersView() {
                       <div className="text-right shrink-0"><p className="text-[10px] text-gray-600 font-mono">{b.code}</p></div>
                     </div>
                   ))}
+                  <div className="px-5 py-3">
+                    {notitieEdit===c.email?(
+                      <div className="space-y-2">
+                        <textarea value={notitieText} onChange={e=>setNotitieText(e.target.value)} rows={2} autoFocus
+                          placeholder="bijv. altijd kort aan de zijkanten"
+                          className="w-full bg-[#0e0e0e] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#2176d4] resize-none"/>
+                        <div className="flex gap-2">
+                          <button onClick={()=>saveNotitie(c.email,notitieText)} disabled={notitieLoading}
+                            className="px-3 py-1.5 bg-[#2176d4] text-white rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-[#3080e0] transition-colors">
+                            {notitieLoading?'...':'Opslaan'}
+                          </button>
+                          <button onClick={()=>setNotitieEdit(null)} className="px-3 py-1.5 border border-[#333] text-gray-400 rounded-lg text-xs font-bold hover:text-white transition-colors">Annuleer</button>
+                        </div>
+                      </div>
+                    ):(
+                      <button onClick={()=>{setNotitieEdit(c.email);setNotitieText(notities[c.email]??'')}}
+                        className="text-left w-full">
+                        {notities[c.email]
+                          ?<p className="text-xs text-amber-400/80 italic">📝 {notities[c.email]}</p>
+                          :<p className="text-xs text-gray-700 hover:text-gray-500 transition-colors">+ Notitie toevoegen</p>
+                        }
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1427,6 +1558,11 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
   const[fotoLoading,setFotoLoading]=useState(false)
   const fotoRef=useRef<HTMLInputElement>(null)
 
+  // Buffer-tijd & proefmail
+  const[bufferTijd,setBufferTijd]=useState(0)
+  const[proefmailMsg,setProefmailMsg]=useState('')
+  const[proefmailLoading,setProefmailLoading]=useState(false)
+
   useEffect(()=>{
     fetch('/api/instellingen').then(r=>r.json()).then(d=>{
       const s=d.instellingen??{}
@@ -1436,6 +1572,7 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
         setDaySchedule(parsed)
       }
       if(s.geblokkeerde_datums)setBlockedDates(JSON.parse(s.geblokkeerde_datums as string) as string[])
+      if(s.buffer_tijd)setBufferTijd(Number(s.buffer_tijd))
     })
     fetch('/api/portaal/profiel').then(r=>r.json()).then(d=>{
       if(d.profiel){setProfielNaam(d.profiel.naam??session.naam);setProfielBio(d.profiel.bio??'');setProfielFoto(d.profiel.foto_url??null)}
@@ -1615,8 +1752,26 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
             )
           })}
         </div>
-        <div className="flex items-center gap-3 mt-4">
-          <button onClick={()=>save('schema',JSON.stringify(daySchedule),'schedule')} disabled={saving.schedule}
+        <div className="flex items-center gap-4 mt-4 pt-4 border-t border-[#1e1e1e]">
+          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider shrink-0">Buffer na afspraak</label>
+          <select value={bufferTijd} onChange={e=>setBufferTijd(Number(e.target.value))}
+            className="bg-[#1a1a1a] border-2 border-[#333] text-white rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-[#2176d4] transition-colors">
+            <option value={0}>Geen buffer</option>
+            <option value={5}>5 minuten</option>
+            <option value={10}>10 minuten</option>
+            <option value={15}>15 minuten</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-3 mt-3">
+          <button onClick={async()=>{
+            setSaving(s=>({...s,schedule:true}));setMsgs(m=>({...m,schedule:''}))
+            await Promise.all([
+              fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'schema',value:JSON.stringify(daySchedule)})}),
+              fetch('/api/instellingen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'buffer_tijd',value:String(bufferTijd)})}),
+            ])
+            setSaving(s=>({...s,schedule:false}));setMsgs(m=>({...m,schedule:'Opgeslagen'}))
+            setTimeout(()=>setMsgs(m=>({...m,schedule:''})),3000)
+          }} disabled={saving.schedule}
             className="px-5 py-2 bg-[#2176d4] text-white rounded-xl font-bold text-sm hover:bg-[#3080e0] hover:shadow-[0_0_20px_rgba(33,118,212,0.3)] disabled:opacity-50 transition-all duration-200">
             {saving.schedule?'Opslaan...':'Opslaan'}
           </button>
@@ -1663,6 +1818,28 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
         <div className="mt-3">
           <CalendarSubscribeButton/>
         </div>
+      </div>
+
+      {/* E-mail / Proefmail */}
+      <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
+        <h2 className="font-semibold text-white mb-1">E-mail</h2>
+        <p className="text-xs text-gray-500 mb-4">Stuur een proefmail om te controleren of e-mail correct werkt</p>
+        <div className="flex items-center justify-between py-3 border border-[#2a2a2a] rounded-xl px-4">
+          <div>
+            <p className="font-bold text-white text-sm">Proefmail sturen</p>
+            <p className="text-xs text-gray-500 font-medium">Wordt verstuurd naar <span className="text-[#2176d4]">{session.email}</span></p>
+          </div>
+          <button disabled={proefmailLoading} onClick={async()=>{
+            setProefmailLoading(true);setProefmailMsg('')
+            const r=await fetch('/api/portaal/proefmail',{method:'POST'})
+            setProefmailLoading(false)
+            setProefmailMsg(r.ok?'Verzonden!':'Mislukt')
+            setTimeout(()=>setProefmailMsg(''),4000)
+          }} className="px-4 py-2 bg-[#2176d4] text-white rounded-lg font-bold text-sm hover:bg-[#3080e0] disabled:opacity-50 transition-colors shrink-0">
+            {proefmailLoading?'Versturen...':'Stuur proefmail'}
+          </button>
+        </div>
+        {proefmailMsg&&<p className={`mt-2 text-sm font-semibold ${proefmailMsg==='Verzonden!'?'text-green-400':'text-red-400'}`}>{proefmailMsg}</p>}
       </div>
 
       {/* Wachtwoord */}

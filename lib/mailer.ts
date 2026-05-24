@@ -97,6 +97,46 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   await transporter.sendMail({ from: FROM, ...opts })
 }
 
+/* ─── Kapper melding bij nieuwe boeking ─────────────────────── */
+export async function stuurKapperMelding(opts: {
+  naar: string
+  kapperNaam: string
+  klantNaam: string
+  service: string
+  datum: string
+  tijd: string
+  prijs: number
+  telefoon: string
+  email: string
+  isStammklant: boolean
+}) {
+  const stammklantBanner = opts.isStammklant
+    ? `<div style="background:rgba(120,53,15,0.2);border:1.5px solid #d97706;border-radius:12px;padding:12px 16px;margin-bottom:20px">
+        <span style="color:#fbbf24;font-weight:800;font-size:14px">⭐ Stammklant</span>
+        <span style="color:#9ca3af;font-size:13px;margin-left:6px">— dit is een vaste klant</span>
+       </div>`
+    : ''
+  const body = `
+    ${stammklantBanner}
+    <h1 style="color:#ffffff;font-size:20px;font-weight:800;margin:0 0 6px">Nieuwe afspraak</h1>
+    <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">Er is een nieuwe boeking geplaatst via Schuurtje.</p>
+    ${infoTable([
+      ['Klant', esc(opts.klantNaam)],
+      ['Dienst', esc(opts.service)],
+      ['Datum', formatDateNL(opts.datum)],
+      ['Tijd', esc(opts.tijd)],
+      ['Prijs', `€${opts.prijs}`],
+      ['Telefoon', esc(opts.telefoon)],
+      ['E-mail', esc(opts.email)],
+    ])}
+  `
+  await sendMail({
+    to: opts.naar,
+    subject: `Nieuwe boeking: ${opts.klantNaam} — ${opts.datum} ${opts.tijd}`,
+    html: base(opts.kapperNaam, body),
+  })
+}
+
 /* ─── 1. Verificatiecode ────────────────────────────────────── */
 export async function stuurVerificatieMail(opts: { naar: string; code: string; kapperNaam: string }) {
   const body = `

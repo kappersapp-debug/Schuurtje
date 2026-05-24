@@ -22,16 +22,29 @@ export async function GET() {
   const monthStart = `${tyr}-${String(tmo).padStart(2,'0')}-01`
   const nextMonthStart = tmo === 12 ? `${tyr+1}-01-01` : `${tyr}-${String(tmo+1).padStart(2,'0')}-01`
 
-  const [{ data: todayBookings }, { data: weekBookings }, { data: allBookings }, { data: monthBookings }] = await Promise.all([
+  // Last 7 days for revenue chart
+  const dag7 = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(tyr, tmo - 1, tdy - 6 + i, 12, 0, 0)
+    return fmt(d)
+  })
+
+  const [{ data: todayBookings }, { data: weekBookings }, { data: allBookings }, { data: monthBookings }, { data: dag7Bookings }] = await Promise.all([
     supabaseAdmin.from('bookings').select('*').eq('barber_id', session.id).eq('datum', todayStr).eq('geannuleerd', false),
     supabaseAdmin.from('bookings').select('prijs').eq('barber_id', session.id).eq('geannuleerd', false).gte('datum', mondayStr).lte('datum', sundayStr),
     supabaseAdmin.from('bookings').select('email').eq('barber_id', session.id).eq('geannuleerd', false),
     supabaseAdmin.from('bookings').select('email').eq('barber_id', session.id).eq('geannuleerd', false).gte('datum', monthStart).lt('datum', nextMonthStart),
+    supabaseAdmin.from('bookings').select('datum, prijs').eq('barber_id', session.id).eq('geannuleerd', false).gte('datum', dag7[0]).lte('datum', dag7[6]),
   ])
 
   const weekOmzet = (weekBookings ?? []).reduce((sum, b) => sum + (b.prijs ?? 0), 0)
   const uniqueEmails = new Set((allBookings ?? []).map(b => b.email).filter(Boolean)).size
   const maandKlanten = new Set((monthBookings ?? []).map(b => b.email).filter(Boolean)).size
+
+  const dagOmzet = dag7.map(datum => ({
+    datum,
+    omzet: (dag7Bookings ?? []).filter(b => b.datum === datum).reduce((s, b) => s + (b.prijs ?? 0), 0),
+    label: new Date(datum + 'T12:00:00').toLocaleDateString('nl-NL', { weekday: 'short' }),
+  }))
 
   return Response.json({
     vandaag: (todayBookings ?? []).length,
@@ -40,5 +53,6 @@ export async function GET() {
     totaalKlanten: uniqueEmails,
     maandKlanten,
     vandaagAfspraken: todayBookings ?? [],
+    dagOmzet,
   })
 }

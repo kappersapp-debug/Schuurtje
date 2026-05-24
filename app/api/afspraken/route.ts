@@ -38,20 +38,18 @@ export async function GET(req: NextRequest) {
     return Response.json({ afspraken: newBookings ?? [], annuleringen: cancellations ?? [] })
   }
 
-  let query = supabaseAdmin
-    .from('bookings').select('*')
-    .eq('barber_id', session.id)
-    .order('datum', { ascending: true })
-    .order('tijd', { ascending: true })
+  const offset = Number(searchParams.get('offset') ?? 0)
+
+  let query = supabaseAdmin.from('bookings').select('*').eq('barber_id', session.id)
 
   if (filter === 'today') {
-    query = query.eq('datum', today).eq('geannuleerd', false)
+    query = query.eq('datum', today).eq('geannuleerd', false).order('tijd', { ascending: true })
   } else if (filter === 'upcoming') {
-    query = query.gte('datum', today).eq('geannuleerd', false).limit(50)
+    query = query.gte('datum', today).eq('geannuleerd', false).order('datum', { ascending: true }).order('tijd', { ascending: true }).limit(50)
   } else if (filter === 'past') {
-    query = query.lt('datum', today)
+    query = query.lt('datum', today).order('datum', { ascending: false }).order('tijd', { ascending: false }).range(offset, offset + 20)
   } else {
-    query = query.eq('geannuleerd', false)
+    query = query.eq('geannuleerd', false).order('datum', { ascending: true }).order('tijd', { ascending: true })
   }
 
   if (month) {
@@ -66,7 +64,9 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query
   if (error) return Response.json({ error: 'DB fout' }, { status: 500 })
-  return Response.json({ afspraken: data })
+  const heeftMeer = filter === 'past' && (data?.length ?? 0) > 20
+  const afspraken = heeftMeer ? (data ?? []).slice(0, 20) : (data ?? [])
+  return Response.json({ afspraken, heeftMeer })
 }
 
 export async function DELETE(req: NextRequest) {

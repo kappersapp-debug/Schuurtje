@@ -32,13 +32,19 @@ export async function GET(
     .from('settings')
     .select('key, value')
     .eq('barber_id', barber.id)
-    .in('key', ['schema', 'diensten'])
+    .in('key', ['schema', 'diensten', 'buffer_tijd', 'geblokkeerde_datums'])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
   const weekSchema: WeekSchedule = JSON.parse(map.schema ?? '{}')
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
   const dienst = diensten.find((d) => d.id === dienstId)
   if (!dienst) return Response.json({ error: 'Dienst niet gevonden' }, { status: 404 })
+
+  const blockedDates: string[] = JSON.parse(map.geblokkeerde_datums ?? '[]')
+  if (blockedDates.includes(datum)) return Response.json({ slots: [], dagOpen: false })
+
+  const dag = new Date(datum + 'T12:00:00').getDay()
+  if (!weekSchema[String(dag)]?.open) return Response.json({ slots: [], dagOpen: false })
 
   const { data: boekingen } = await supabaseAdmin
     .from('bookings')
@@ -47,6 +53,7 @@ export async function GET(
     .eq('datum', datum)
     .eq('geannuleerd', false)
 
-  const slots = genereerSlots(datum, weekSchema, dienst, boekingen ?? [])
-  return Response.json({ slots })
+  const bufferTijd = Number(map.buffer_tijd ?? 0)
+  const slots = genereerSlots(datum, weekSchema, dienst, boekingen ?? [], bufferTijd)
+  return Response.json({ slots, dagOpen: true })
 }

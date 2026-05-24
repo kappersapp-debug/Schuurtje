@@ -67,14 +67,18 @@ function googleCalLink(booking: BookingResult, barberNaam: string) {
 /* ─── Calendar ───────────────────────────────────────────── */
 type Beschikbaarheid = Record<string, 'beschikbaar'|'bijna_vol'|'vol'|'gesloten'>
 
-function Calendar({ value, onChange, beschikbaarheid, onMonthChange }: {
+function Calendar({ value, onChange, beschikbaarheid, onMonthChange, initialMonth }: {
   value: string
   onChange: (date: string) => void
   beschikbaarheid: Beschikbaarheid
   onMonthChange?: (jaar: number, maand: number) => void
+  initialMonth?: Date
 }) {
   const today = new Date(); today.setHours(0,0,0,0)
-  const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const [viewMonth, setViewMonth] = useState(() => {
+    const base = initialMonth ? new Date(initialMonth.getFullYear(), initialMonth.getMonth(), 1) : new Date(today.getFullYear(), today.getMonth(), 1)
+    return base >= new Date(today.getFullYear(), today.getMonth(), 1) ? base : new Date(today.getFullYear(), today.getMonth(), 1)
+  })
 
   const firstDay = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1)
   const lastDay  = new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 0)
@@ -138,14 +142,18 @@ function Calendar({ value, onChange, beschikbaarheid, onMonthChange }: {
 /* ─── Progress ───────────────────────────────────────────── */
 function Progress({ step }: { step: number }) {
   const labels = ['Dienst','Datum','Tijd','Gegevens','Verificatie']
+  const pct = (step - 1) / (labels.length - 1) * 100
   return (
-    <div className="flex items-start justify-between mb-8">
+    <div className="flex items-start justify-between mb-8 relative">
+      <div className="absolute top-4 left-[10%] right-[10%] h-0.5 -translate-y-1/2 bg-[#333] rounded-full">
+        <div className="absolute left-0 top-0 h-full bg-[#2176d4] rounded-full transition-all duration-500"
+          style={{ width: `${pct}%` }}/>
+      </div>
       {labels.map((label, i) => {
         const n = i+1; const active = n===step; const done = n<step
         return (
-          <div key={n} className="flex flex-col items-center flex-1 relative">
-            {i>0 && <div className={`absolute top-4 right-1/2 w-full h-0.5 -translate-y-1/2 ${n<=step?'bg-[#2176d4]':'bg-[#333]'}`}/>}
-            <div className={['w-8 h-8 rounded-full flex items-center justify-center text-xs font-black mb-1 relative z-10 transition-all',
+          <div key={n} className="flex flex-col items-center flex-1 relative z-10">
+            <div className={['w-8 h-8 rounded-full flex items-center justify-center text-xs font-black mb-1 transition-all',
               done?'bg-[#2176d4] text-white':active?'bg-[#2176d4] text-white ring-4 ring-[#2176d4]/20':'bg-[#222] text-gray-600',
             ].join(' ')}>
               {done?'✓':n}
@@ -159,7 +167,7 @@ function Progress({ step }: { step: number }) {
 }
 
 /* ─── Main Component ─────────────────────────────────────── */
-type Review = { id: string; naam: string; rating: number; tekst: string | null; created_at: string }
+type Review = { id: string; naam: string; rating: number; tekst: string | null; created_at: string; reply?: string | null }
 
 export default function BookingForm({ slug, diensten, barberNaam, barberBio, barberFoto, reviews = [], meestGeboektId = null }: { slug: string; diensten: Service[]; barberNaam: string; barberBio?: string; barberFoto?: string; reviews?: Review[]; meestGeboektId?: string | null }) {
   const [step, setStep]         = useState<number|'bevestiging'|'geblokkeerd'>(1)
@@ -167,6 +175,7 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
   const [datum, setDatum]       = useState('')
   const [tijd, setTijd]         = useState('')
   const [slots, setSlots]       = useState<string[]>([])
+  const [dagOpen, setDagOpen]   = useState<boolean|null>(null)
   const [slotsLaden, setSlotsLaden] = useState(false)
   const [contact, setContact]   = useState({ naam: '', telefoon: '', email: '' })
   const [notities, setNotities] = useState('')
@@ -261,11 +270,12 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
   }
 
   async function fetchSlots(d: string, dienstId: string) {
-    setSlotsLaden(true); setSlots([])
+    setSlotsLaden(true); setSlots([]); setDagOpen(null)
     try {
       const r = await fetch(`/api/slots/${slug}?datum=${d}&dienst=${dienstId}`)
       const data = await r.json()
       setSlots(data.slots ?? [])
+      setDagOpen(data.dagOpen ?? null)
     } finally { setSlotsLaden(false) }
   }
 
@@ -467,9 +477,9 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
     setShowVerzet(true); setVerzetKlaar(false)
     setVerzetDatum(''); setVerzetTijd(''); setVerzetFout('')
     if (booking) {
-      const now = new Date()
+      const bookingDate = new Date(booking.datum + 'T12:00:00')
       const d = diensten.find(d=>d.naam===booking.service)
-      if (d) fetchBeschikbaarheid(now.getFullYear(), now.getMonth()+1, d.id)
+      if (d) fetchBeschikbaarheid(bookingDate.getFullYear(), bookingDate.getMonth()+1, d.id)
     }
   }
 
@@ -491,10 +501,10 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
   }
 
   useEffect(() => {
-    if (step===3 && !slotsLaden && slots.length===0 && !wlKlaar) {
+    if (step===3 && !slotsLaden && slots.length===0 && !wlKlaar && dagOpen!==false) {
       setShowWachtlijst(true)
     }
-  }, [step, slotsLaden, slots, wlKlaar])
+  }, [step, slotsLaden, slots, wlKlaar, dagOpen])
 
   useEffect(() => {
     if (step === 5) {
@@ -606,6 +616,7 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                         <button onClick={()=>setShowVerzet(false)} className="text-gray-500 hover:text-white text-xl leading-none transition-colors">×</button>
                       </div>
                       <Calendar value={verzetDatum} beschikbaarheid={beschikbaarheid}
+                        initialMonth={booking ? new Date(booking.datum + 'T12:00:00') : undefined}
                         onMonthChange={(j,m)=>{ const d=diensten.find(d=>d.naam===booking.service); if(d)fetchBeschikbaarheid(j,m,d.id) }}
                         onChange={d=>{setVerzetDatum(d);setVerzetTijd('');fetchVerzetSlots(d)}}/>
                       {verzetDatum&&(
@@ -750,21 +761,36 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                     </div>
                   ):slots.length===0?(
                     <div className="py-2">
-                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
-                          <div>
-                            <p className="text-sm font-bold text-amber-400">Dag vol</p>
-                            <p className="text-xs text-amber-500/70">Meld je aan voor de wachtlijst of kies een andere dag</p>
+                      {dagOpen===false?(
+                        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                            <div>
+                              <p className="text-sm font-bold text-gray-400">Niet beschikbaar</p>
+                              <p className="text-xs text-gray-600">Deze dag is gesloten of geblokkeerd</p>
+                            </div>
                           </div>
+                          <button onClick={()=>setStep(2)} className="shrink-0 text-xs font-bold text-gray-400 hover:text-white transition-colors whitespace-nowrap">
+                            Andere dag →
+                          </button>
                         </div>
-                        <button onClick={()=>{setStep(2);setShowWachtlijst(false);setWlKlaar(false);setWlStap('form');setWlFout('');setWlCodeDigits(['','','','','',''])}}
-                          className="shrink-0 text-xs font-bold text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap">
-                          Andere dag →
-                        </button>
-                      </div>
-                      {/* Waitlist UI */}
-                      {!wlKlaar?(
+                      ):(
+                        <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                            <div>
+                              <p className="text-sm font-bold text-amber-400">Volgeboekt</p>
+                              <p className="text-xs text-amber-500/70">Meld je aan voor de wachtlijst of kies een andere dag</p>
+                            </div>
+                          </div>
+                          <button onClick={()=>{setStep(2);setShowWachtlijst(false);setWlKlaar(false);setWlStap('form');setWlFout('');setWlCodeDigits(['','','','','',''])}}
+                            className="shrink-0 text-xs font-bold text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap">
+                            Andere dag →
+                          </button>
+                        </div>
+                      )}
+                      {/* Waitlist UI — only when day is actually open but full */}
+                      {dagOpen!==false&&(!wlKlaar?(
                         wlStap==='verify'?(
                           <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5 space-y-4">
                             <div>
@@ -816,11 +842,22 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                           </div>
                         )
                       ):(
-                        <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-2xl px-5 py-4 text-center">
-                          <p className="font-bold text-[#2176d4] text-sm">✓ Je staat op de wachtlijst!</p>
-                          <p className="text-xs text-gray-500 mt-1">We nemen contact op als er een plek vrijkomt.</p>
+                        <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-2xl px-5 py-5 space-y-3">
+                          <div className="text-center">
+                            <p className="font-bold text-[#2176d4]">✓ Je staat op de wachtlijst!</p>
+                            <p className="text-xs text-gray-500 mt-1">We nemen contact op als er een plek vrijkomt.</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={()=>{setStep(2);setShowWachtlijst(false);setWlKlaar(false);setWlStap('form');setWlFout('');setWlCodeDigits(['','','','','',''])}}
+                              className="flex-1 py-2 bg-[#2176d4] text-white rounded-xl text-xs font-bold hover:bg-[#3080e0] transition-colors">
+                              Andere dag →
+                            </button>
+                            <a href="/" className="flex-1 py-2 text-center border border-[#2a2a2a] text-gray-400 rounded-xl text-xs font-bold hover:text-white hover:border-[#333] transition-colors">
+                              Naar home
+                            </a>
+                          </div>
                         </div>
-                      )}
+                      ))}
                     </div>
                   ):(
                     <div>
@@ -1033,6 +1070,12 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                           </div>
                         </div>
                         {r.tekst && <p className="text-gray-500 text-xs leading-relaxed">{r.tekst}</p>}
+                        {r.reply && (
+                          <div className="mt-1.5 flex items-start gap-1.5">
+                            <span className="text-[#2176d4]/60 text-xs shrink-0">↳</span>
+                            <p className="text-xs text-[#2176d4]/70 italic">{r.reply}</p>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

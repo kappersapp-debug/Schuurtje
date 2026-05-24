@@ -56,15 +56,16 @@ export default async function KapperPage({
   const dertigDagenGeleden = addDays(vandaag, -30)
 
   const [{ data: settingsRows }, { data: reviewRows }, { data: boekingCounts }] = await Promise.all([
-    supabaseAdmin.from('settings').select('key, value').eq('barber_id', barber.id).in('key', ['diensten']),
+    supabaseAdmin.from('settings').select('key, value').eq('barber_id', barber.id).in('key', ['diensten', 'review_replies']),
     supabaseAdmin.from('reviews').select('id, naam, rating, tekst, created_at').eq('barber_id', barber.id).order('created_at', { ascending: false }).limit(10),
     supabaseAdmin.from('bookings').select('service').eq('barber_id', barber.id).eq('geannuleerd', false).gte('datum', dertigDagenGeleden).lte('datum', vandaag),
   ])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
   const diensten: Service[] = JSON.parse(map.diensten ?? '[]')
+  const reviewReplies: Record<string, string> = JSON.parse(map.review_replies ?? '{}')
 
-  const reviews = (reviewRows ?? []) as { id: string; naam: string; rating: number; tekst: string | null; created_at: string }[]
+  const reviews = (reviewRows ?? []).map(r => ({ ...r, reply: reviewReplies[r.id] ?? null })) as { id: string; naam: string; rating: number; tekst: string | null; created_at: string; reply: string | null }[]
 
   const teller: Record<string, number> = {}
   for (const b of boekingCounts ?? []) {

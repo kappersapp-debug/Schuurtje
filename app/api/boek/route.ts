@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { genereerSlots, nlVandaag, generateCode } from '@/lib/slots'
-import { stuurBevestiging } from '@/lib/mailer'
+import { stuurBevestiging, stuurKapperMelding } from '@/lib/mailer'
 import { rateLimit } from '@/lib/rate-limit'
 import type { WeekSchedule, Service } from '@/lib/types'
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   const { data: barber } = await supabaseAdmin
     .from('barbers')
-    .select('id, naam')
+    .select('id, naam, email')
     .eq('slug', slug)
     .eq('actief', true)
     .single()
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     .from('settings')
     .select('key, value')
     .eq('barber_id', barber.id)
-    .in('key', ['schema', 'diensten'])
+    .in('key', ['schema', 'diensten', 'buffer_tijd'])
 
   const map = Object.fromEntries((settingsRows ?? []).map((r) => [r.key, r.value]))
   const weekSchema: WeekSchedule = JSON.parse(map.schema ?? '{}')
@@ -59,7 +59,8 @@ export async function POST(req: NextRequest) {
     .eq('datum', datum)
     .eq('geannuleerd', false)
 
-  const beschikbaar = genereerSlots(datum, weekSchema, dienst, boekingen ?? [])
+  const bufferTijd = Number(map.buffer_tijd ?? 0)
+  const beschikbaar = genereerSlots(datum, weekSchema, dienst, boekingen ?? [], bufferTijd)
   if (!beschikbaar.includes(tijd)) {
     return Response.json({ error: 'Dit tijdslot is niet meer beschikbaar' }, { status: 409 })
   }
@@ -88,7 +89,24 @@ export async function POST(req: NextRequest) {
   })
   if (error) return Response.json({ error: 'Opslaan mislukt' }, { status: 500 })
 
+  // Stammklant check (count includes just-inserted booking)
+  const { count: aantalBoekingen } = await supabaseAdmin
+    .from('bookings').select('*', { count: 'exact', head: true })
+    .eq('barber_id', barber.id).eq('email', email.toLowerCase().trim()).eq('geannuleerd', false)
+  const isStammklant = (aantalBoekingen ?? 0) >= 3
+
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
+
+  // Kapper notificatie
+  if (barber.email) {
+    stuurKapperMelding({
+      naar: barber.email, kapperNaam: barber.naam,
+      klantNaam: naam, service: dienst.naam, datum, tijd,
+      prijs: dienst.prijs, telefoon, email: email.toLowerCase().trim(),
+      isStammklant,
+    }).catch(() => {})
+  }
+
   try {
     await stuurBevestiging({
       naar: email,

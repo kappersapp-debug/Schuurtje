@@ -21,6 +21,7 @@ export function genereerSlots(
   weekSchema: WeekSchedule,
   dienst: Service,
   boekingen: Pick<Booking, 'tijd' | 'duur'>[],
+  bufferTijd = 0,
 ): string[] {
   const dag = new Date(datum + 'T12:00:00').getDay()
   const schema = weekSchema[String(dag)]
@@ -42,10 +43,10 @@ export function genereerSlots(
     })
     if (inPauze) continue
 
-    // check overlap met bestaande boekingen
+    // check overlap met bestaande boekingen (incl. optionele buffer erna)
     const overlapping = boekingen.some((b) => {
       const bStart = toMins(b.tijd)
-      const bEnd = bStart + b.duur
+      const bEnd = bStart + b.duur + bufferTijd
       return slotStart < bEnd && bStart < slotEnd
     })
     if (overlapping) continue
