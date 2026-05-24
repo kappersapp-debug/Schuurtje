@@ -22,11 +22,21 @@ async function getEersteSlot(
   const kortsteService = diensten.length ? diensten.reduce((a, b) => a.duur <= b.duur ? a : b) : null
   if (!kortsteService) return null
 
-  const vandaag = nlVandaag()
+  const nowNl = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' })
+  const vandaag = nowNl.split(' ')[0]
+  const [nh, nm] = nowNl.split(' ')[1].split(':').map(Number)
+  const nowMins = nh * 60 + nm
+
   for (let i = 0; i < 7; i++) {
     const datum = addDays(vandaag, i)
     const dagBoekingen = boekingen.filter(b => b.datum === datum)
-    const slots = genereerSlots(datum, schema, kortsteService, dagBoekingen)
+    let slots = genereerSlots(datum, schema, kortsteService, dagBoekingen)
+    if (i === 0) {
+      slots = slots.filter(s => {
+        const [sh, sm] = s.split(':').map(Number)
+        return sh * 60 + sm > nowMins
+      })
+    }
     if (slots.length > 0) {
       const dagNaam = i === 0 ? 'Vandaag' : i === 1 ? 'Morgen' : NL_DAYS[new Date(datum + 'T12:00:00').getDay()]
       return { dag: dagNaam, tijd: slots[0] }
