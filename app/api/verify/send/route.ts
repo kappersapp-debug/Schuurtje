@@ -1,17 +1,10 @@
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { rateLimit } from '@/lib/rate-limit'
+import { stuurVerificatieMail } from '@/lib/mailer'
 import { createHash } from 'crypto'
-import nodemailer from 'nodemailer'
 
 export const dynamic = 'force-dynamic'
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT ?? 587),
-  secure: process.env.SMTP_PORT === '465',
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-})
 
 function hashCode(code: string) {
   return createHash('sha256').update(code).digest('hex')
@@ -59,21 +52,7 @@ export async function POST(req: NextRequest) {
   })
 
   try {
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: email,
-      subject: `Verificatiecode – ${barber.naam}`,
-      html: `
-        <div style="font-family:sans-serif;max-width:400px;margin:auto">
-          <h2 style="margin-bottom:8px">${barber.naam}</h2>
-          <p>Gebruik deze code om je boeking te bevestigen:</p>
-          <div style="font-size:36px;font-weight:bold;letter-spacing:8px;text-align:center;padding:24px;background:#f4f4f5;border-radius:12px;margin:16px 0">
-            ${code}
-          </div>
-          <p style="color:#71717a;font-size:14px">Geldig voor 10 minuten.</p>
-        </div>
-      `,
-    })
+    await stuurVerificatieMail({ naar: email, code, kapperNaam: barber.naam })
   } catch {
     return Response.json({ error: 'Mail versturen mislukt' }, { status: 500 })
   }
