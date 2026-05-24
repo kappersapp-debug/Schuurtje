@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (search) {
-    query = query.or(`naam.ilike.%${search}%,email.ilike.%${search}%,code.ilike.%${search}%`)
+    query = query.or(`naam.ilike.%${search}%,email.ilike.%${search}%,code.ilike.%${search}%,telefoon.ilike.%${search}%`)
   }
 
   const { data, error } = await query

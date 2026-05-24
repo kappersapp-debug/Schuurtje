@@ -23,6 +23,7 @@ const bebasNeue = Bebas_Neue({
 export const metadata: Metadata = {
   title: 'Schuurtje — kappers platform',
   description: 'Boek een afspraak bij jouw kapper',
+  manifest: '/manifest.json',
 }
 
 export const viewport: Viewport = {

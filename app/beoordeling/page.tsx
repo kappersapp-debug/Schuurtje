@@ -25,7 +25,7 @@ function BeoordelingForm() {
   const code = params.get('code')?.toUpperCase() ?? ''
 
   const [status, setStatus] = useState<'laden'|'form'|'al_beoordeeld'|'niet_gevonden'|'nog_niet'|'verstuurd'>('laden')
-  const [boeking, setBoeking] = useState<{naam: string; service: string}|null>(null)
+  const [boeking, setBoeking] = useState<{naam: string; service: string; datum: string; kapperNaam: string | null}|null>(null)
   const [rating, setRating] = useState(0)
   const [tekst, setTekst] = useState('')
   const [saving, setSaving] = useState(false)
@@ -36,7 +36,7 @@ function BeoordelingForm() {
     fetch(`/api/review?code=${code}`)
       .then(r => r.json())
       .then(d => {
-        if (d.ok) { setBoeking({ naam: d.naam, service: d.service }); setStatus('form') }
+        if (d.ok) { setBoeking({ naam: d.naam, service: d.service, datum: d.datum, kapperNaam: d.kapperNaam ?? null }); setStatus('form') }
         else if (d.error === 'Al beoordeeld') setStatus('al_beoordeeld')
         else if (d.error === 'Afspraak nog niet geweest') setStatus('nog_niet')
         else setStatus('niet_gevonden')
@@ -63,7 +63,7 @@ function BeoordelingForm() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <span className="text-[#2176d4] text-2xl">✂</span>
-          <p className="text-gray-600 text-sm mt-1">Schuurtje</p>
+          <p className="text-gray-600 text-sm mt-1">{boeking?.kapperNaam ?? 'Schuurtje'}</p>
         </div>
 
         <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-8">
@@ -109,7 +109,12 @@ function BeoordelingForm() {
             <form onSubmit={submit} className="space-y-6">
               <div>
                 <h2 className="font-bold text-white text-xl mb-1">Beoordeling achterlaten</h2>
-                <p className="text-gray-500 text-sm">{boeking.service}</p>
+                <p className="text-gray-400 text-sm font-medium">{boeking.service}</p>
+                {boeking.datum && (
+                  <p className="text-gray-600 text-xs mt-0.5">
+                    {new Date(boeking.datum + 'T12:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                )}
               </div>
 
               <div>

@@ -333,6 +333,8 @@ function PortalShell({session,onLogout}:{session:Session;onLogout:()=>void}) {
 }
 
 /* ─── Dashboard ──────────────────────────────────────────── */
+interface DashboardReview { id: string; naam: string; rating: number; tekst: string|null; created_at: string }
+
 function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:Session}) {
   const[stats,setStats]=useState<Stats|null>(null)
   const[upcoming,setUpcoming]=useState<Afspraak[]>([])
@@ -340,6 +342,7 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
   const[dayBreaks,setDayBreaks]=useState<BreakSlot[]>([])
   const[waitlistCount,setWaitlistCount]=useState<number|null>(null)
   const[lastUpdated,setLastUpdated]=useState('')
+  const[recentReviews,setRecentReviews]=useState<DashboardReview[]>([])
 
   const loadDashboard=useCallback(()=>{
     fetch('/api/portaal/stats').then(r=>r.json()).then(d=>setStats(d))
@@ -351,9 +354,10 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
         if(b.datum===today){const[h,m]=b.tijd.split(':').map(Number);return h*60+m>nowMins}
         return false
       })
-      setUpcoming(filtered.slice(0,5))
+      setUpcoming(filtered.slice(0,8))
     })
     fetch('/api/wachtlijst').then(r=>r.json()).then(d=>setWaitlistCount((d.wachtlijst??[]).length))
+    fetch('/api/portaal/reviews').then(r=>r.json()).then(d=>setRecentReviews(d.reviews??[])).catch(()=>{})
     setLastUpdated(new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'}))
   },[])
 
@@ -413,18 +417,18 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         {[
           {label:'Vandaag',value:stats?.vandaag??'—',sub:'afspraken',gold:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>},
-          {label:'Deze week',value:stats?.week??'—',sub:'afspraken',gold:false,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>},
+          {label:'Week omzet',value:stats?.weekOmzet!=null?`€${stats.weekOmzet}`:'—',sub:`${stats?.week??0} afspraken`,gold:false,green:true,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>},
           {label:'Deze maand',value:stats?.maandKlanten??'—',sub:'klanten',gold:false,icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>},
           {label:'Wachtlijst',value:waitlistCount??'—',sub:'openstaand',gold:false,amber:(waitlistCount??0)>0,onClick:()=>onNavigate('management'),icon:<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25H12M3 3.375C3 2.339 3.84 1.5 4.875 1.5H7.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125H4.875A1.875 1.875 0 013 6.375V3.375z"/></svg>},
         ].map((c,i)=>(
           <div key={c.label} style={{animationDelay:`${i*60}ms`}} onClick={(c as {onClick?:()=>void}).onClick}
-            className={`animate-fade-up rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${(c as {onClick?:()=>void}).onClick?'cursor-pointer':''} ${c.gold?'bg-gradient-to-br from-[#2176d4]/15 to-[#2176d4]/5 border-[#2176d4]/25 hover:shadow-[#2176d4]/10':(c as {amber?:boolean}).amber?'bg-amber-900/15 border-amber-800/30 hover:shadow-amber-900/20':'bg-[#141414] border-[#222] hover:border-[#2a2a2a] hover:shadow-black/40'}`}>
+            className={`animate-fade-up rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${(c as {onClick?:()=>void}).onClick?'cursor-pointer':''} ${c.gold?'bg-gradient-to-br from-[#2176d4]/15 to-[#2176d4]/5 border-[#2176d4]/25 hover:shadow-[#2176d4]/10':(c as {green?:boolean}).green?'bg-green-900/15 border-green-800/30 hover:shadow-green-900/20':(c as {amber?:boolean}).amber?'bg-amber-900/15 border-amber-800/30 hover:shadow-amber-900/20':'bg-[#141414] border-[#222] hover:border-[#2a2a2a] hover:shadow-black/40'}`}>
             <div className="flex items-start justify-between mb-3">
-              <p className={`text-[11px] font-bold uppercase tracking-widest ${c.gold?'text-[#2176d4]/60':(c as {amber?:boolean}).amber?'text-amber-500/70':'text-gray-600'}`}>{c.label}</p>
-              <span className={c.gold?'text-[#2176d4]/40':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-700'}>{c.icon}</span>
+              <p className={`text-[11px] font-bold uppercase tracking-widest ${c.gold?'text-[#2176d4]/60':(c as {green?:boolean}).green?'text-green-500/70':(c as {amber?:boolean}).amber?'text-amber-500/70':'text-gray-600'}`}>{c.label}</p>
+              <span className={c.gold?'text-[#2176d4]/40':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-700'}>{c.icon}</span>
             </div>
-            <p className={`text-4xl font-black leading-none ${c.gold?'text-[#2176d4]':(c as {amber?:boolean}).amber?'text-amber-400':'text-white'}`}><AnimatedNumber value={c.value as number|string}/></p>
-            <p className={`text-xs mt-2 ${c.gold?'text-[#2176d4]/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-600'}`}>{c.sub}</p>
+            <p className={`text-4xl font-black leading-none ${c.gold?'text-[#2176d4]':(c as {green?:boolean}).green?'text-green-400':(c as {amber?:boolean}).amber?'text-amber-400':'text-white'}`}><AnimatedNumber value={c.value as number|string}/></p>
+            <p className={`text-xs mt-2 ${c.gold?'text-[#2176d4]/50':(c as {green?:boolean}).green?'text-green-500/50':(c as {amber?:boolean}).amber?'text-amber-500/50':'text-gray-600'}`}>{c.sub}</p>
           </div>
         ))}
       </div>
@@ -432,10 +436,10 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
         <div className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a] hover:shadow-lg hover:shadow-black/30">
           <div className="px-5 py-4 border-b border-[#1a1a1a] flex items-center justify-between">
             <div><h2 className="font-bold text-white text-sm">Aankomende afspraken</h2><p className="text-xs text-gray-600 mt-0.5">{upcoming.length} gepland</p></div>
-            <span className="w-8 h-8 rounded-xl bg-[#2176d4]/10 flex items-center justify-center text-[#2176d4]"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5"/></svg></span>
+            <button onClick={()=>onNavigate('appointments')} className="w-8 h-8 rounded-xl bg-[#2176d4]/10 flex items-center justify-center text-[#2176d4] hover:bg-[#2176d4]/20 transition-colors"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5"/></svg></button>
           </div>
           {upcoming.length===0?<div className="py-10 text-center"><p className="text-gray-600 text-sm">Geen aankomende afspraken</p></div>:(
-            <div className="divide-y divide-[#1a1a1a]">
+            <div className="divide-y divide-[#1a1a1a] max-h-80 overflow-y-auto">
               {upcoming.map(b=>(
                 <div key={b.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/2 transition-colors">
                   <div className="shrink-0 w-10 h-10 rounded-xl bg-[#2176d4]/10 flex flex-col items-center justify-center">
@@ -469,6 +473,39 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
           </div>
         </div>
       </div>
+
+      {recentReviews.length>0&&(
+        <div className="mt-6 bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-300 hover:border-[#2a2a2a]">
+          <div className="px-5 py-4 border-b border-[#1a1a1a] flex items-center justify-between">
+            <div>
+              <h2 className="font-bold text-white text-sm">Recente beoordelingen</h2>
+              <p className="text-xs text-gray-600 mt-0.5">
+                Gemiddeld {(recentReviews.reduce((s,r)=>s+r.rating,0)/recentReviews.length).toFixed(1)} · {recentReviews.length} reviews
+              </p>
+            </div>
+            <div className="flex gap-0.5">
+              {[1,2,3,4,5].map(n=>{
+                const avg=recentReviews.reduce((s,r)=>s+r.rating,0)/recentReviews.length
+                return <svg key={n} className={`w-4 h-4 ${n<=Math.round(avg)?'text-amber-400':'text-gray-700'}`} fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+              })}
+            </div>
+          </div>
+          <div className="divide-y divide-[#1a1a1a]">
+            {recentReviews.slice(0,3).map(r=>(
+              <div key={r.id} className="px-5 py-3.5 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-400/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-black text-amber-400">{r.rating}★</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-white text-sm">{r.naam}</p>
+                  {r.tekst&&<p className="text-xs text-gray-500 truncate mt-0.5">{r.tekst}</p>}
+                </div>
+                <p className="text-[10px] text-gray-700 shrink-0">{new Date(r.created_at).toLocaleDateString('nl-NL',{day:'numeric',month:'short'})}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -768,7 +805,7 @@ function AppointmentsView({session}:{session:Session}) {
         </div>
       </div>
       <div className="flex flex-col gap-3 mb-6">
-        <input type="text" placeholder="Zoeken op naam, e-mail of code..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#2176d4] transition-colors"/>
+        <input type="text" placeholder="Zoeken op naam, e-mail, code of telefoon..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-[#1a1a1a] border-2 border-[#333] text-white placeholder-gray-600 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-[#2176d4] transition-colors"/>
         <div className="flex gap-1 bg-[#1a1a1a] rounded-xl p-1 border border-[#2a2a2a] overflow-x-auto">
           {filters.map(f=><button key={f.id} onClick={()=>setFilter(f.id)} className={['flex-1 min-w-fit px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',filter===f.id?'bg-[#2176d4] text-white shadow-sm':'text-gray-500 hover:text-gray-300'].join(' ')}>{f.label}</button>)}
         </div>
@@ -837,17 +874,30 @@ function CustomersView() {
           {filtered.map(c=>(
             <div key={c.email} className="bg-[#141414] rounded-2xl border border-[#222] overflow-hidden transition-all duration-200 hover:border-[#2a2a2a]">
               <button onClick={()=>setExpanded(expanded===c.email?null:c.email)} className="w-full flex items-center gap-4 px-5 py-4 text-left">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-sm font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">{c.naam.charAt(0).toUpperCase()}</div>
-                <div className="flex-1 min-w-0"><p className="font-bold text-white truncate">{c.naam}</p><p className="text-xs text-gray-500 truncate">{c.email}</p></div>
+                <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-sm font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">
+                  {c.naam.charAt(0).toUpperCase()}
+                  {c.bezoeken>=5&&<span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 rounded-full flex items-center justify-center text-[8px] font-black text-black" title="Stammklant">★</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-bold text-white truncate">{c.naam}</p>
+                    {c.bezoeken>=5&&<span className="text-[9px] font-black text-amber-400 uppercase tracking-wide">Stammklant</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 truncate">{c.email}</p>
+                </div>
                 <div className="flex items-center gap-4 shrink-0 text-right">
                   <div className="hidden sm:block"><p className="text-xs text-gray-600">bezoeken</p><p className="font-black text-white">{c.bezoeken}</p></div>
+                  <div className="hidden sm:block"><p className="text-xs text-gray-600">besteed</p><p className="font-black text-green-400 text-sm">€{c.totaalBesteed}</p></div>
                   <div><p className="text-xs text-gray-600">laatste bezoek</p><p className="font-bold text-white text-sm">{formatShortDate(c.lastDate)}</p></div>
                   <svg className={`w-4 h-4 text-gray-600 transition-transform duration-200 ${expanded===c.email?'rotate-180':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
                 </div>
               </button>
               {expanded===c.email&&(
                 <div className="border-t border-[#1e1e1e] divide-y divide-[#1a1a1a]">
-                  <div className="px-5 py-3 flex gap-6 sm:hidden"><div><p className="text-xs text-gray-600">bezoeken</p><p className="font-black text-white">{c.bezoeken}</p></div></div>
+                  <div className="px-5 py-3 flex gap-6 sm:hidden">
+                    <div><p className="text-xs text-gray-600">bezoeken</p><p className="font-black text-white">{c.bezoeken}</p></div>
+                    <div><p className="text-xs text-gray-600">totaal besteed</p><p className="font-black text-green-400">€{c.totaalBesteed}</p></div>
+                  </div>
                   {c.afspraken.map((b,i)=>(
                     <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-white/2 transition-colors">
                       <div className="w-8 h-8 rounded-lg bg-[#1e1e1e] flex items-center justify-center text-[10px] font-black text-gray-500 shrink-0">{serviceInitial(b.service)}</div>
@@ -866,12 +916,12 @@ function CustomersView() {
 }
 
 /* ─── Services ───────────────────────────────────────────── */
-interface DienstItem{id:string;naam:string;prijs:number;duur:number;beschrijving:string}
+interface DienstItem{id:string;naam:string;prijs:number;duur:number;beschrijving:string;actief?:boolean}
 const DEFAULT_DIENSTEN:DienstItem[]=[
-  {id:'knipbeurt',naam:'Knipbeurt',prijs:20,duur:30,beschrijving:'30 minuten'},
-  {id:'knipbeurt-baard',naam:'Knipbeurt met baard',prijs:25,duur:45,beschrijving:'45 minuten'},
-  {id:'baard-trimmen',naam:'Baard trimmen',prijs:10,duur:15,beschrijving:'15 minuten'},
-  {id:'contouren',naam:'Contouren',prijs:5,duur:15,beschrijving:'15 minuten'},
+  {id:'knipbeurt',naam:'Knipbeurt',prijs:20,duur:30,beschrijving:'30 minuten',actief:true},
+  {id:'knipbeurt-baard',naam:'Knipbeurt met baard',prijs:25,duur:45,beschrijving:'45 minuten',actief:true},
+  {id:'baard-trimmen',naam:'Baard trimmen',prijs:10,duur:15,beschrijving:'15 minuten',actief:true},
+  {id:'contouren',naam:'Contouren',prijs:5,duur:15,beschrijving:'15 minuten',actief:true},
 ]
 
 function ServicesView() {
@@ -900,6 +950,16 @@ function ServicesView() {
     setDiensten(updated);persist(updated);setForm(null)
   }
   function remove(id:string){const updated=diensten.filter(s=>s.id!==id);setDiensten(updated);persist(updated);setConfirmRemove(null)}
+  function move(id:string,dir:-1|1){
+    const idx=diensten.findIndex(s=>s.id===id); if(idx<0)return
+    const newIdx=idx+dir; if(newIdx<0||newIdx>=diensten.length)return
+    const updated=[...diensten]; [updated[idx],updated[newIdx]]=[updated[newIdx],updated[idx]]
+    setDiensten(updated); persist(updated)
+  }
+  function toggleActief(id:string){
+    const updated=diensten.map(s=>s.id===id?{...s,actief:s.actief===false?true:false}:s)
+    setDiensten(updated); persist(updated)
+  }
 
   return(
     <div className="max-w-2xl">
@@ -926,13 +986,24 @@ function ServicesView() {
         </div>
       )}
       <div className="space-y-3">
-        {diensten.map(s=>(
-          <div key={s.id} className="bg-[#141414] rounded-2xl border border-[#222] p-4 flex items-center gap-4 transition-all duration-200 hover:border-[#2a2a2a] hover:-translate-y-px hover:shadow-md hover:shadow-black/30">
+        {diensten.map((s,idx)=>(
+          <div key={s.id} className={`bg-[#141414] rounded-2xl border p-4 flex items-center gap-3 transition-all duration-200 hover:border-[#2a2a2a] hover:-translate-y-px hover:shadow-md hover:shadow-black/30 ${s.actief===false?'border-[#1e1e1e] opacity-60':'border-[#222]'}`}>
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <button onClick={()=>move(s.id,-1)} disabled={idx===0} className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-gray-300 disabled:opacity-20 transition-colors rounded">▲</button>
+              <button onClick={()=>move(s.id,1)} disabled={idx===diensten.length-1} className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-gray-300 disabled:opacity-20 transition-colors rounded">▼</button>
+            </div>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2176d4]/20 to-[#2176d4]/5 flex items-center justify-center text-xs font-black text-[#2176d4] shrink-0 border border-[#2176d4]/10">{serviceInitial(s.naam)}</div>
-            <div className="flex-1 min-w-0"><p className="font-black text-white">{s.naam}</p><p className="text-sm text-gray-400">{s.beschrijving} · {s.duur} min</p></div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-black text-white">{s.naam}</p>
+                {s.actief===false&&<span className="text-[9px] font-black text-gray-600 uppercase tracking-wide border border-[#2a2a2a] px-1.5 py-0.5 rounded">Inactief</span>}
+              </div>
+              <p className="text-sm text-gray-400">{s.beschrijving} · {s.duur} min</p>
+            </div>
             <div className="text-right shrink-0">
               <p className="font-black text-[#2176d4] text-lg">€{s.prijs}</p>
-              <div className="flex gap-3 mt-1 justify-end">
+              <div className="flex gap-3 mt-1 justify-end items-center">
+                <button onClick={()=>toggleActief(s.id)} className={`text-xs hover:underline ${s.actief===false?'text-green-400':'text-gray-500'}`}>{s.actief===false?'Activeer':'Verberg'}</button>
                 <button onClick={()=>setForm({...s})} className="text-xs text-[#2176d4] hover:underline">Bewerken</button>
                 {confirmRemove===s.id?<span className="flex gap-1"><button onClick={()=>remove(s.id)} className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-lg font-bold">Ja</button><button onClick={()=>setConfirmRemove(null)} className="text-xs border border-[#333] text-gray-400 px-2 py-0.5 rounded-lg font-bold">Nee</button></span>:<button onClick={()=>setConfirmRemove(s.id)} className="text-xs text-red-400 hover:text-red-500">Verwijder</button>}
               </div>
@@ -1149,6 +1220,7 @@ function WaitlistSection({slug}:{slug:string}){
                           {w.telefoon&&<a href={`tel:${w.telefoon}`} className="text-xs text-[#2176d4] hover:underline">{w.telefoon}</a>}
                           {w.email&&<a href={`mailto:${w.email}`} className="text-xs text-[#2176d4] hover:underline">{w.email}</a>}
                         </div>
+                        <p className="text-xs text-gray-700 mt-0.5">Ingeschreven {new Date(w.created_at).toLocaleDateString('nl-NL',{day:'numeric',month:'long'})}</p>
                       </div>
                       <div className="flex gap-2 shrink-0">
                         <button onClick={()=>openAssign(w)}
@@ -1313,6 +1385,7 @@ function ManagementView({session}:{session:Session}){
                 <div className="min-w-0">
                   <p className="font-medium text-white truncate">{b.email}</p>
                   {b.reden&&<p className="text-xs text-gray-500 mt-0.5">{b.reden}</p>}
+                  <p className="text-xs text-gray-700 mt-0.5">Geband op {new Date(b.created_at).toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'})}</p>
                 </div>
                 {confirmUnban===b.id?(
                   <div className="flex gap-1 shrink-0">
@@ -1439,7 +1512,10 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
       {/* Profiel */}
       <div className="bg-[#141414] rounded-xl border border-[#2a2a2a] p-5">
         <h2 className="font-semibold text-white mb-1">Profiel</h2>
-        <p className="text-xs text-gray-500 mb-4">Naam, bio en profielfoto die klanten zien</p>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-gray-500">Naam, bio en profielfoto die klanten zien</p>
+          <a href={`/${session.slug}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#2176d4] hover:underline font-medium">Bekijk profiel →</a>
+        </div>
         <form onSubmit={slaProfielOp} className="space-y-4">
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -1460,7 +1536,7 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
               <p className="text-[10px] text-gray-700 mt-1">Max 5MB · JPG, PNG, WebP</p>
             </div>
           </div>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Naam</label>
               <input value={profielNaam} onChange={e=>setProfielNaam(e.target.value)} required
@@ -1468,8 +1544,8 @@ function SettingsView({session,onProfielUpdate}:{session:Session;onProfielUpdate
             </div>
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Bio</label>
-              <input value={profielBio} onChange={e=>setProfielBio(e.target.value)} placeholder="Korte beschrijving..."
-                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors"/>
+              <textarea value={profielBio} onChange={e=>setProfielBio(e.target.value)} placeholder="Korte beschrijving..." rows={3}
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#2176d4] transition-colors resize-none"/>
             </div>
           </div>
           {profielErr&&<p className="text-sm text-red-400 font-semibold">{profielErr}</p>}

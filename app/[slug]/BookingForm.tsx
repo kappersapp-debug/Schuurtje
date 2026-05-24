@@ -496,6 +496,12 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
     }
   }, [step, slotsLaden, slots, wlKlaar])
 
+  useEffect(() => {
+    if (step === 5) {
+      setTimeout(() => codeRefs.current[0]?.focus(), 100)
+    }
+  }, [step])
+
   /* ── Render ── */
   return (
     <div className="min-h-screen bg-[#0c0c0c] flex flex-col font-[family-name:var(--font-barlow)]">
@@ -565,7 +571,7 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                 <p className="text-3xl font-black text-[#2176d4] tracking-widest">{booking.code}</p>
               </div>
               <div className="mb-6 rounded-xl overflow-hidden border border-[#2a2a2a] divide-y divide-[#1e1e1e]">
-                {[['Dienst',booking.service],['Datum',formatDatumNL(booking.datum)],['Tijd',booking.tijd],['Prijs',`€${booking.prijs}`]].map(([k,v])=>(
+                {[['Dienst',booking.service],['Datum',formatDatumNL(booking.datum)],['Tijd',booking.tijd],['Duur',`${booking.duur} minuten`],['Prijs',`€${booking.prijs}`]].map(([k,v])=>(
                   <div key={k} className="flex justify-between px-4 py-3 text-sm">
                     <span className="text-gray-500 font-medium">{k}</span>
                     <span className="font-bold text-white">{v}</span>
@@ -573,14 +579,19 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                 ))}
               </div>
               <div className="space-y-3">
-                <button onClick={()=>downloadICS(booking,barberNaam)}
-                  className="w-full py-3 px-4 rounded-xl border border-[#2a2a2a] text-gray-300 font-medium hover:border-[#2176d4]/50 hover:text-white transition-all">
-                  Agenda toevoegen (.ics)
-                </button>
-                <a href={googleCalLink(booking,barberNaam)} target="_blank" rel="noopener noreferrer"
-                  className="block w-full py-3 px-4 rounded-xl border border-[#2a2a2a] text-gray-300 font-medium hover:border-[#2176d4]/50 hover:text-white transition-all text-center">
-                  Google Agenda
-                </a>
+                <p className="text-xs font-bold text-gray-600 uppercase tracking-wider">Toevoegen aan agenda</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={()=>downloadICS(booking,barberNaam)}
+                    className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-[#2a2a2a] text-gray-300 text-sm font-medium hover:border-[#2176d4]/50 hover:text-white transition-all">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                    Apple / .ics
+                  </button>
+                  <a href={googleCalLink(booking,barberNaam)} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-[#2a2a2a] text-gray-300 text-sm font-medium hover:border-[#2176d4]/50 hover:text-white transition-all text-center">
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M21.35 11.1H12.18V13.83H18.69C18.36 17.64 15.19 19.27 12.19 19.27C8.36 19.27 5 16.25 5 12C5 7.9 8.2 4.73 12.2 4.73C15.29 4.73 17.1 6.7 17.1 6.7L19 4.72C19 4.72 16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12C2.03 17.05 6.16 22 12.25 22C17.6 22 21.5 18.33 21.5 12.91C21.5 11.76 21.35 11.1 21.35 11.1Z"/></svg>
+                    Google
+                  </a>
+                </div>
                 {showVerzet?(
                   verzetKlaar?(
                     <div className="bg-[#2176d4]/10 border border-[#2176d4]/20 rounded-xl p-5 text-center">
@@ -698,7 +709,11 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-500">{s.duur} minuten</p>
+                          {s.beschrijving && s.beschrijving !== `${s.duur} min` ? (
+                            <p className="text-sm text-gray-500">{s.beschrijving}</p>
+                          ) : (
+                            <p className="text-sm text-gray-500">{s.duur} minuten</p>
+                          )}
                         </div>
                         <p className="text-2xl font-black text-[#2176d4] ml-4">€{s.prijs}</p>
                       </button>
@@ -735,12 +750,18 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                     </div>
                   ):slots.length===0?(
                     <div className="py-2">
-                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
-                        <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
-                        <div>
-                          <p className="text-sm font-bold text-amber-400">Dag vol</p>
-                          <p className="text-xs text-amber-500/70">Meld je aan voor de wachtlijst hieronder</p>
+                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                          <div>
+                            <p className="text-sm font-bold text-amber-400">Dag vol</p>
+                            <p className="text-xs text-amber-500/70">Meld je aan voor de wachtlijst of kies een andere dag</p>
+                          </div>
                         </div>
+                        <button onClick={()=>{setStep(2);setShowWachtlijst(false);setWlKlaar(false);setWlStap('form');setWlFout('');setWlCodeDigits(['','','','','',''])}}
+                          className="shrink-0 text-xs font-bold text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap">
+                          Andere dag →
+                        </button>
                       </div>
                       {/* Waitlist UI */}
                       {!wlKlaar?(
@@ -803,7 +824,7 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
                     </div>
                   ):(
                     <div>
-                      <div className="grid grid-cols-4 gap-2">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                         {slots.map(slot=>(
                           <button key={slot} onClick={()=>{setTijd(slot);setStep(4)}}
                             className={['py-3 rounded-xl text-sm font-bold transition-all',
@@ -969,31 +990,55 @@ export default function BookingForm({ slug, diensten, barberNaam, barberBio, bar
       {reviews.length > 0 && (
         <div className="max-w-lg mx-auto w-full px-4 mb-6">
           <div className="bg-[#141414] rounded-2xl border border-[#2a2a2a] p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div>
-                <p className="font-bold text-white text-sm">Beoordelingen</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-amber-400 text-sm tracking-tight">
-                    {'★'.repeat(Math.round(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length))}
-                    {'☆'.repeat(5-Math.round(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length))}
-                  </span>
-                  <span className="text-gray-500 text-xs">
-                    {(reviews.reduce((s,r)=>s+r.rating,0)/reviews.length).toFixed(1)} · {reviews.length} {reviews.length===1?'beoordeling':'beoordelingen'}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {reviews.slice(0,5).map(r=>(
-                <div key={r.id} className="border-t border-[#1e1e1e] pt-3 first:border-0 first:pt-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-semibold text-white text-sm">{r.naam}</span>
-                    <span className="text-amber-400 text-xs">{'★'.repeat(r.rating)}{'☆'.repeat(5-r.rating)}</span>
+            {(() => {
+              const avg = reviews.reduce((s,r)=>s+r.rating,0)/reviews.length
+              const dist = [5,4,3,2,1].map(n => ({ n, count: reviews.filter(r=>r.rating===n).length }))
+              return (
+                <>
+                  <div className="flex items-center gap-4 mb-5">
+                    <div className="text-center shrink-0">
+                      <p className="text-4xl font-black text-white">{avg.toFixed(1)}</p>
+                      <div className="flex gap-0.5 justify-center mt-1">
+                        {[1,2,3,4,5].map(n=>(
+                          <svg key={n} className={`w-3.5 h-3.5 ${n<=Math.round(avg)?'text-amber-400':'text-gray-700'}`} fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+                          </svg>
+                        ))}
+                      </div>
+                      <p className="text-gray-600 text-[10px] mt-1">{reviews.length} {reviews.length===1?'review':'reviews'}</p>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      {dist.map(({n,count})=>(
+                        <div key={n} className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-600 w-3 shrink-0">{n}</span>
+                          <div className="flex-1 h-1.5 bg-[#1e1e1e] rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-400 rounded-full transition-all" style={{width: reviews.length ? `${(count/reviews.length)*100}%` : '0%'}}/>
+                          </div>
+                          <span className="text-[10px] text-gray-600 w-3 text-right shrink-0">{count}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {r.tekst && <p className="text-gray-500 text-xs leading-relaxed">{r.tekst}</p>}
-                </div>
-              ))}
-            </div>
+                  <div className="space-y-3 border-t border-[#1e1e1e] pt-4">
+                    {reviews.slice(0,5).map(r=>(
+                      <div key={r.id} className="border-b border-[#1a1a1a] pb-3 last:border-0 last:pb-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-white text-sm">{r.naam}</span>
+                          <div className="flex gap-0.5">
+                            {[1,2,3,4,5].map(n=>(
+                              <svg key={n} className={`w-3 h-3 ${n<=r.rating?'text-amber-400':'text-gray-700'}`} fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+                              </svg>
+                            ))}
+                          </div>
+                        </div>
+                        {r.tekst && <p className="text-gray-500 text-xs leading-relaxed">{r.tekst}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}

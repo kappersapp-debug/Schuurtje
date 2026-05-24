@@ -2,10 +2,28 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
 import { nlVandaag } from '@/lib/slots'
 import type { Service } from '@/lib/types'
+import type { Metadata } from 'next'
 import BookingForm from './BookingForm'
 import AnnuleerVerzet from './AnnuleerVerzet'
 
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const { data: barber } = await supabaseAdmin
+    .from('barbers').select('naam, bio').eq('slug', slug).eq('actief', true).single()
+  if (!barber) return { title: 'Kapper niet gevonden' }
+  const desc = barber.bio ? `${barber.bio} — Boek online bij ${barber.naam}` : `Boek online een afspraak bij ${barber.naam}. Direct beschikbaarheid zien, geen wachttijden.`
+  return {
+    title: `${barber.naam} — Afspraak boeken`,
+    description: desc,
+    openGraph: {
+      title: `Boek bij ${barber.naam}`,
+      description: desc,
+      type: 'website',
+    },
+  }
+}
 
 function addDays(dateStr: string, n: number): string {
   const d = new Date(dateStr + 'T12:00:00')

@@ -32,12 +32,12 @@ function Avatar({ k, size }: { k: Kapper; size: number }) {
 }
 
 function SlotBadge({ slot }: { slot: EersteSlot }) {
-  if (!slot) return <span className="text-xs text-gray-600">Momenteel niet beschikbaar</span>
+  if (!slot) return <span className="text-xs text-gray-600">Geen beschikbaarheid komende week</span>
   const isVandaag = slot.dag === 'Vandaag'
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-bold ${isVandaag ? 'text-green-400' : 'text-gray-400'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${isVandaag ? 'bg-green-400' : 'bg-gray-600'}`}/>
-      {slot.dag} {slot.tijd}
+      <span className={`w-1.5 h-1.5 rounded-full ${isVandaag ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`}/>
+      Eerste slot: {slot.dag} {slot.tijd}
     </span>
   )
 }
@@ -54,12 +54,22 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
 
   const recentKapper = recentSlug ? kappers.find(k => k.slug === recentSlug) ?? null : null
 
+  const sorted = [...kappers].sort((a, b) => {
+    const aVandaag = a.eersteSlot?.dag === 'Vandaag' ? 0 : a.eersteSlot ? 1 : 2
+    const bVandaag = b.eersteSlot?.dag === 'Vandaag' ? 0 : b.eersteSlot ? 1 : 2
+    if (aVandaag !== bVandaag) return aVandaag - bVandaag
+    const aRating = a.rating ?? 0
+    const bRating = b.rating ?? 0
+    if (bRating !== aRating) return bRating - aRating
+    return a.naam.localeCompare(b.naam)
+  })
+
   const filtered = search.trim()
-    ? kappers.filter(k =>
+    ? sorted.filter(k =>
         k.naam.toLowerCase().includes(search.toLowerCase()) ||
         k.bio?.toLowerCase().includes(search.toLowerCase())
       )
-    : kappers
+    : sorted
 
   function handleClick(slug: string) {
     setCookie('recent_kapper', slug)
@@ -164,6 +174,16 @@ export default function HomeClient({ kappers }: { kappers: Kapper[] }) {
           )}
         </div>
       </main>
+
+      <footer className="border-t border-[#161616] mt-4">
+        <div className="max-w-2xl mx-auto px-6 py-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[#2176d4] text-sm">✂</span>
+            <span className="font-[family-name:var(--font-bebas)] tracking-widest text-gray-700 text-sm">Schuurtje</span>
+          </div>
+          <p className="text-gray-700 text-xs">© {new Date().getFullYear()} Schuurtje — Online kapper boeken</p>
+        </div>
+      </footer>
     </div>
   )
 }

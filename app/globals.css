@@ -30,6 +30,15 @@
   animation: shimmer 1.4s infinite;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a #0c0c0c;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0c0c0c; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
 @theme {
   --font-sans: var(--font-nunito);
   --color-brand: #1d4ed8;

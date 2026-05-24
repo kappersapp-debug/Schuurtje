@@ -25,7 +25,10 @@ export async function GET(req: NextRequest) {
     .from('reviews').select('id').eq('booking_code', code).single()
   if (existing) return Response.json({ error: 'Al beoordeeld' }, { status: 409 })
 
-  return Response.json({ ok: true, naam: booking.naam, service: booking.service })
+  const { data: barber } = await supabaseAdmin
+    .from('barbers').select('naam').eq('id', booking.barber_id).single()
+
+  return Response.json({ ok: true, naam: booking.naam, service: booking.service, datum: booking.datum, kapperNaam: barber?.naam ?? null })
 }
 
 export async function POST(req: NextRequest) {
