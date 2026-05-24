@@ -24,7 +24,7 @@ function BeoordelingForm() {
   const params = useSearchParams()
   const code = params.get('code')?.toUpperCase() ?? ''
 
-  const [status, setStatus] = useState<'laden'|'form'|'al_beoordeeld'|'niet_gevonden'|'verstuurd'>('laden')
+  const [status, setStatus] = useState<'laden'|'form'|'al_beoordeeld'|'niet_gevonden'|'nog_niet'|'verstuurd'>('laden')
   const [boeking, setBoeking] = useState<{naam: string; service: string}|null>(null)
   const [rating, setRating] = useState(0)
   const [tekst, setTekst] = useState('')
@@ -38,6 +38,7 @@ function BeoordelingForm() {
       .then(d => {
         if (d.ok) { setBoeking({ naam: d.naam, service: d.service }); setStatus('form') }
         else if (d.error === 'Al beoordeeld') setStatus('al_beoordeeld')
+        else if (d.error === 'Afspraak nog niet geweest') setStatus('nog_niet')
         else setStatus('niet_gevonden')
       })
       .catch(() => setStatus('niet_gevonden'))
@@ -69,6 +70,14 @@ function BeoordelingForm() {
           {status === 'laden' && (
             <div className="flex justify-center py-8">
               <div className="w-8 h-8 border-4 border-[#2176d4] border-t-transparent rounded-full animate-spin"/>
+            </div>
+          )}
+
+          {status === 'nog_niet' && (
+            <div className="text-center py-4">
+              <p className="text-2xl mb-3">⏳</p>
+              <h2 className="font-bold text-white mb-2">Afspraak nog niet geweest</h2>
+              <p className="text-gray-500 text-sm">U kunt een beoordeling achterlaten nadat uw afspraak heeft plaatsgevonden.</p>
             </div>
           )}
 
