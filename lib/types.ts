@@ -82,6 +82,7 @@ export type Service = {
   naam: string
   prijs: number
   duur: number
+  beschrijving?: string
 }
 
 export type KapperSession = {
