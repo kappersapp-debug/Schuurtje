@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
 
   const token = createKapperToken({ id: barber.id, email: barber.email, slug: barber.slug, naam: barber.naam })
   const res = Response.json({ ok: true, slug: barber.slug })
-  res.headers.set('Set-Cookie', `${COOKIE_KAPPER}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL}`)
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  res.headers.set('Set-Cookie', `${COOKIE_KAPPER}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL}${secure}`)
   return res
 }

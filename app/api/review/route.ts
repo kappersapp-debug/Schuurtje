@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rateLimit } from '@/lib/rate-limit'
 
 function isVoorbij(datum: string, tijd: string): boolean {
   const now = new Date(new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }))
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for') ?? 'unknown'
+  if (!rateLimit(`review-ip:${ip}`, 5, 60_000)) {
+    return Response.json({ error: 'Te veel verzoeken' }, { status: 429 })
+  }
+
   const body = await req.json().catch(() => null)
   const { code, rating, tekst } = body ?? {}
   if (!code || !rating) return Response.json({ error: 'Code en rating vereist' }, { status: 400 })

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /portaal
+Disallow: /admin
+Disallow: /api/
+Disallow: /wachtwoord-vergeten
+Disallow: /wachtwoord-reset

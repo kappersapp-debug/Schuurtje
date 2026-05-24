@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
 
   const token = createAdminToken()
   const res = Response.json({ ok: true })
-  res.headers.set('Set-Cookie', `${COOKIE_ADMIN}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL}`)
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  res.headers.set('Set-Cookie', `${COOKIE_ADMIN}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL}${secure}`)
   return res
 }
