@@ -22,6 +22,14 @@ export async function POST(req: NextRequest) {
   if (datum < nlVandaag()) {
     return Response.json({ error: 'Datum ligt in het verleden' }, { status: 400 })
   }
+  if (datum === nlVandaag()) {
+    const nowNl = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' })
+    const [nh, nm] = nowNl.split(' ')[1].split(':').map(Number)
+    const [th, tm] = tijd.split(':').map(Number)
+    if (th * 60 + tm <= nh * 60 + nm) {
+      return Response.json({ error: 'Dit tijdslot ligt in het verleden' }, { status: 400 })
+    }
+  }
 
   const { data: barber } = await supabaseAdmin
     .from('barbers')

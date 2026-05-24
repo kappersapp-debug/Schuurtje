@@ -54,6 +54,17 @@ export async function GET(
     .eq('geannuleerd', false)
 
   const bufferTijd = Number(map.buffer_tijd ?? 0)
-  const slots = genereerSlots(datum, weekSchema, dienst, boekingen ?? [], bufferTijd)
+  let slots = genereerSlots(datum, weekSchema, dienst, boekingen ?? [], bufferTijd)
+
+  if (datum === nlVandaag()) {
+    const nowNl = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' })
+    const [nh, nm] = nowNl.split(' ')[1].split(':').map(Number)
+    const nowMins = nh * 60 + nm
+    slots = slots.filter(s => {
+      const [sh, sm] = s.split(':').map(Number)
+      return sh * 60 + sm > nowMins
+    })
+  }
+
   return Response.json({ slots, dagOpen: true })
 }
