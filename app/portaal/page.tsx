@@ -50,6 +50,11 @@ function isBreak(slot: string, breaks: BreakSlot[]) {
   const[sh,sm]=slot.split(':').map(Number); const sMin=sh*60+sm
   return breaks.some(b=>{ const[bsh,bsm]=b.start.split(':').map(Number),[beh,bem]=b.end.split(':').map(Number); return sMin>=bsh*60+bsm&&sMin<beh*60+bem })
 }
+function slotBoeking<T extends {tijd:string;duur:number}>(slot:string,bookings:T[]):{b:T;isStart:boolean}|null {
+  const sMin=toMins(slot)
+  for(const b of bookings){const bStart=toMins(b.tijd),bEnd=bStart+(b.duur||30);if(sMin>=bStart&&sMin<bEnd)return{b,isStart:sMin===bStart}}
+  return null
+}
 
 type View = 'dashboard'|'calendar'|'appointments'|'customers'|'services'|'management'|'settings'
 
@@ -496,12 +501,12 @@ function DashboardView({onNavigate,session}:{onNavigate:(v:View)=>void;session:S
           <div className="overflow-y-auto max-h-72">
             {workSlots.length===0&&<p className="text-center text-gray-600 text-sm py-10">Geen werkrooster vandaag</p>}
             {workSlots.map(slot=>{
-              const b=stats?.vandaagAfspraken?.find(b=>b.tijd===slot)
+              const match=slotBoeking(slot,stats?.vandaagAfspraken??[]);const b=match?.b??null;const isStart=match?.isStart??false
               const isPause=isBreak(slot,dayBreaks)
               return(
                 <div key={slot} className={`flex items-center gap-3 px-4 py-2.5 border-b border-[#1a1a1a] transition-colors ${b?'bg-[#2176d4]/4 hover:bg-[#2176d4]/6':isPause?'bg-amber-900/8':'hover:bg-white/2'}`}>
                   <span className={`font-black text-[11px] w-12 text-center shrink-0 px-1.5 py-1 rounded-lg ${b?'bg-[#2176d4] text-white':isPause?'bg-amber-900/30 text-amber-500':'bg-[#1e1e1e] text-gray-500'}`}>{slot}</span>
-                  {isPause?<span className="text-amber-500/70 text-xs">Pauze</span>:b?(<><div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-500 truncate">{b.service}</p></div><span className="ml-auto bg-[#2176d4] text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0">€{b.prijs}</span></>):<span className="text-gray-700 text-xs">Vrij</span>}
+                  {isPause?<span className="text-amber-500/70 text-xs">Pauze</span>:b&&isStart?(<><div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-500 truncate">{b.service}</p></div><span className="ml-auto bg-[#2176d4] text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0">€{b.prijs}</span></>):b?<span className="text-[#2176d4]/50 text-xs truncate">{b.naam}</span>:<span className="text-gray-700 text-xs">Vrij</span>}
                 </div>
               )
             })}
@@ -666,11 +671,12 @@ function CalendarView() {
           <div className="overflow-y-auto max-h-96">
             {slots.length===0&&<p className="text-center text-gray-600 text-sm font-medium py-10">Geen rooster beschikbaar</p>}
             {slots.map(slot=>{
-              const b=dayBookings.find(b=>b.tijd===slot); const isPause=isBreak(slot,dayCfg?.breaks??[])
+              const match=slotBoeking(slot,dayBookings);const b=match?.b??null;const isStart=match?.isStart??false
+              const isPause=isBreak(slot,dayCfg?.breaks??[])
               return(
                 <div key={slot} className={`flex items-center gap-3 px-3 py-2.5 border-b border-[#1e1e1e] ${b?'bg-[#2176d4]/5':isPause?'bg-amber-900/10':'bg-[#161616]'}`}>
                   <span className={`font-black text-xs w-14 text-center shrink-0 px-2 py-1 rounded-lg ${b?'bg-[#2176d4] text-white':isPause?'bg-amber-900/30 text-amber-400':'bg-[#1e1e1e] text-[#2176d4] border border-[#2176d4]/20'}`}>{slot}</span>
-                  {isPause?<span className="text-amber-400 text-xs font-medium">Pauze</span>:b?<div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-400">{b.service} · €{b.prijs}</p></div>:<span className="text-gray-600 text-xs font-medium">Vrij</span>}
+                  {isPause?<span className="text-amber-400 text-xs font-medium">Pauze</span>:b&&isStart?<div className="min-w-0 flex-1"><p className="font-bold text-white text-sm truncate">{b.naam}</p><p className="text-xs text-gray-400">{b.service} · €{b.prijs}</p></div>:b?<span className="text-[#2176d4]/50 text-xs truncate">{b.naam}</span>:<span className="text-gray-600 text-xs font-medium">Vrij</span>}
                 </div>
               )
             })}
